@@ -34,6 +34,19 @@ swift run mentu-recipes check shell-smoke
 swift run mentu-recipes run shell-smoke
 ```
 
+## Documentation
+
+The public documentation is in [docs/README.md](docs/README.md).
+
+Start with:
+
+- [Overview](docs/overview.md)
+- [Install](docs/install.md)
+- [Quick Start](docs/quick-start.md)
+- [Recipe Schema](docs/recipe-schema.md)
+- [Providers](docs/providers.md)
+- [Security Model](docs/security-model.md)
+
 Recipe files are discovered in this order:
 
 1. `<workspace>/.mentu/recipes`
