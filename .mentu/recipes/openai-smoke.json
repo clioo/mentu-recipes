@@ -1,0 +1,14 @@
+{
+  "name": "openai-smoke",
+  "description": "OpenAI Responses smoke recipe.",
+  "backend": "openai",
+  "model": "gpt-5.5",
+  "steps": [
+    {
+      "label": "openai-ping",
+      "prompt_file": "PROMPT-openai-smoke.md",
+      "completion_keyword": "OPENAI_SMOKE_COMPLETE",
+      "timeout": 90
+    }
+  ]
+}

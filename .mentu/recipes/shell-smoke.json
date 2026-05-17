@@ -1,0 +1,13 @@
+{
+  "name": "shell-smoke",
+  "description": "Local shell smoke recipe.",
+  "steps": [
+    {
+      "label": "say-hello",
+      "backend": "shell",
+      "prompt": "echo MENTU_RECIPES_COMPLETE",
+      "completion_keyword": "MENTU_RECIPES_COMPLETE",
+      "timeout": 10
+    }
+  ]
+}

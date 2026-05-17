@@ -1,0 +1,14 @@
+{
+  "name": "deepseek-smoke",
+  "description": "DeepSeek OpenAI-compatible chat-completions smoke recipe.",
+  "backend": "deepseek",
+  "model": "deepseek-chat",
+  "steps": [
+    {
+      "label": "deepseek-ping",
+      "prompt_file": "PROMPT-deepseek-smoke.md",
+      "completion_keyword": "DEEPSEEK_SMOKE_COMPLETE",
+      "timeout": 90
+    }
+  ]
+}

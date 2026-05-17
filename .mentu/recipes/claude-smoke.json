@@ -1,0 +1,13 @@
+{
+  "name": "claude-smoke",
+  "description": "Claude CLI smoke recipe.",
+  "backend": "claude",
+  "steps": [
+    {
+      "label": "claude-ping",
+      "prompt_file": "PROMPT-claude-smoke.md",
+      "completion_keyword": "CLAUDE_SMOKE_COMPLETE",
+      "timeout": 90
+    }
+  ]
+}
