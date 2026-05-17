@@ -10,11 +10,23 @@ rendering, provider-neutral execution, retries, timeouts, vault/env resolution,
 run logs, and deterministic verification.
 
 Mentu Intelligence lives behind `api.mentu.ai`. When configured, it can add
-cloud verdicts, trust scoring, completion adjudication, correction learning,
-feature gates, and future premium recipe intelligence. Local execution still
-works without a Mentu API key.
+cloud verdicts, trust scoring, completion checks, correction learning, feature
+gates, and future premium recipe intelligence. Local execution still works
+without a Mentu API key.
+
+This repository contains the public runner layer only. It does not contain
+Mentu private platform internals, proprietary evaluation logic, private model
+runtime code, confidential release systems, or internal automation assets.
 
 ## Quick Start
+
+Install the signed macOS package:
+
+```sh
+curl -fsSL https://get.mentu.ai | sh
+```
+
+Or build from source:
 
 ```sh
 swift build
@@ -35,6 +47,16 @@ Prompt files are discovered in:
 
 Prompt paths are always resolved inside those prompt roots. Absolute paths,
 `~`, path traversal, and symlink escapes are rejected.
+
+## What A Recipe Does
+
+A recipe is a JSON file with a name, optional defaults, and one or more steps.
+Each step chooses a backend, prompt source, timeout, retry behavior, and an
+optional deterministic completion keyword. Steps run locally and write run
+records under `.mentu/runs/<run-id>/`.
+
+Recipes are plain files. You can keep them in a project, review them in code
+review, and run them from CI or a local terminal.
 
 ## Example Recipe
 
@@ -65,6 +87,16 @@ mentu-recipes vault get <key>
 mentu-recipes vault list
 mentu-recipes scan [path]
 ```
+
+## Built-In Backends
+
+- `shell`: runs an explicit local shell command and succeeds by exit code.
+- `openai`: uses the OpenAI Responses API for ChatGPT and GPT models.
+- `claude`: uses the local Claude CLI when installed.
+- `deepseek`: uses DeepSeek through an OpenAI-compatible chat API.
+- `openai-compatible`: can target providers with compatible chat APIs.
+
+Shell is explicit only. It is never selected automatically.
 
 ## Provider Credentials
 
@@ -99,6 +131,21 @@ Cloud failures do not stop local execution. Runs are marked local-only when
 Mentu Intelligence is unavailable. Step output is not sent for cloud evaluation
 unless a recipe explicitly sets `"cloud": { "evaluate_steps": true }`.
 
+## Security Boundary
+
+Treat recipes as code. A recipe can call external model providers and, when a
+step uses the `shell` backend, execute local commands. Review third-party
+recipes before running them.
+
+The runner rejects prompt paths outside configured prompt roots and rejects step
+working directories outside the selected workspace. Provider credentials are
+read from environment variables or vault keys and are not written to run logs by
+the runner.
+
+The public repository is intentionally limited to the local recipe runner. Mentu
+private intelligence remains in the cloud API and is not distributed in this
+source package.
+
 ## Release Check
 
 Before publishing a source or binary artifact:
@@ -109,3 +156,13 @@ swift run mentu-recipes scan .
 
 The scanner fails on private paths, likely secrets, confidential markers, and
 protected Mentu platform terms that should not be present in the public repo.
+
+For macOS package releases, the ship scripts also scan the compiled binary and
+expanded package payload before notarization.
+
+## License
+
+Mentu Recipes is source-available under the included license. You may read, run,
+copy, and modify it for personal, internal, educational, and evaluation use.
+Commercial redistribution, hosted-service use, and competing commercial workflow
+services require a separate written license from Mentu.
