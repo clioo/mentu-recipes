@@ -6,6 +6,7 @@ public struct ReleaseScanFinding: Codable, Sendable {
 }
 
 public enum ReleaseScanner {
+    private static let maxScannedBytes = 100_000_000
     private static let localUserPathMarker = ["", "Users", "rashid"].joined(separator: "/")
 
     private static let protectedTerms: [String] = [
@@ -29,9 +30,30 @@ public enum ReleaseScanner {
     ]
 
     public static func scan(root: URL) -> [ReleaseScanFinding] {
+        scan(paths: [root])
+    }
+
+    public static func scan(paths: [URL]) -> [ReleaseScanFinding] {
+        var findings: [ReleaseScanFinding] = []
+        for root in paths {
+            findings += scanOne(root: root)
+        }
+        return findings
+    }
+
+    private static func scanOne(root: URL) -> [ReleaseScanFinding] {
         var findings: [ReleaseScanFinding] = []
         let fm = FileManager.default
         let rootPath = root.resolvingSymlinksInPath().path
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+            return [.init(file: root.path, reason: "scan target does not exist")]
+        }
+        if !isDirectory.boolValue {
+            findings += scanFile(url: root, relative: root.lastPathComponent)
+            return findings
+        }
+
         guard let enumerator = fm.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -45,25 +67,39 @@ public enum ReleaseScanner {
             }
             if shouldSkip(relative) { continue }
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-                  values.isRegularFile == true,
-                  let data = try? Data(contentsOf: url),
-                  data.count <= 2_000_000,
-                  let text = String(data: data, encoding: .utf8) else {
+                  values.isRegularFile == true else {
                 continue
             }
+            findings += scanFile(url: url, relative: relative)
+        }
+        return findings
+    }
 
-            if text.contains(localUserPathMarker) {
-                findings.append(.init(file: relative, reason: "hardcoded local user path"))
-            }
-            if text.contains(confidentialMarker) {
-                findings.append(.init(file: relative, reason: "confidential marker"))
-            }
-            if containsLikelySecret(text) {
-                findings.append(.init(file: relative, reason: "likely secret token"))
-            }
-            for term in protectedTerms where containsProtectedTerm(term, in: text) {
-                findings.append(.init(file: relative, reason: "protected internal term: \(term)"))
-            }
+    private static func scanFile(url: URL, relative: String) -> [ReleaseScanFinding] {
+        guard let data = try? Data(contentsOf: url) else {
+            return [.init(file: relative, reason: "could not read scan target")]
+        }
+        guard data.count <= maxScannedBytes else {
+            return [.init(file: relative, reason: "file too large for release scan")]
+        }
+        let utf8Text = String(data: data, encoding: .utf8)
+        let binaryMode = utf8Text == nil || data.contains(0)
+        guard let text = utf8Text ?? String(data: data, encoding: .isoLatin1) else {
+            return [.init(file: relative, reason: "could not decode scan target")]
+        }
+
+        var findings: [ReleaseScanFinding] = []
+        if text.contains(localUserPathMarker) {
+            findings.append(.init(file: relative, reason: "hardcoded local user path"))
+        }
+        if text.contains(confidentialMarker) {
+            findings.append(.init(file: relative, reason: "confidential marker"))
+        }
+        if containsLikelySecret(text) {
+            findings.append(.init(file: relative, reason: "likely secret token"))
+        }
+        for term in protectedTerms where (!binaryMode || term.count > 3) && containsProtectedTerm(term, in: text) {
+            findings.append(.init(file: relative, reason: "protected internal term: \(term)"))
         }
         return findings
     }
@@ -83,7 +119,8 @@ public enum ReleaseScanner {
             ".swiftpm/",
             ".git/",
             ".mentu/runs/",
-            ".mentu/cache/"
+            ".mentu/cache/",
+            "dist/stage/"
         ]
         return skips.contains { relative.hasPrefix($0) }
     }

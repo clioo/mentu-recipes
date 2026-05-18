@@ -24,6 +24,28 @@ public enum ProcessRunner {
         maxOutputBytes: Int,
         eventSink: @escaping (String) -> Void
     ) async throws -> AdapterResult {
+        try await run(
+            executable: executable,
+            arguments: arguments,
+            env: env,
+            workingDirectory: workingDirectory,
+            timeout: timeout,
+            maxOutputBytes: maxOutputBytes,
+            stdoutSink: { eventSink($0) },
+            stderrSink: { eventSink($0) }
+        )
+    }
+
+    public static func run(
+        executable: String,
+        arguments: [String],
+        env: [String: String],
+        workingDirectory: URL,
+        timeout: Int,
+        maxOutputBytes: Int,
+        stdoutSink: @escaping (String) -> Void,
+        stderrSink: @escaping (String) -> Void
+    ) async throws -> AdapterResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -32,25 +54,29 @@ public enum ProcessRunner {
 
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        process.standardInput = stdin
 
         let buffer = OutputBuffer(maxBytes: maxOutputBytes)
-
-        stdout.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            buffer.appendStdout(text)
-            eventSink(text)
-        }
-        stderr.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            buffer.appendStderr(text)
-            eventSink(text)
-        }
+        let readers = DispatchGroup()
 
         try process.run()
+        try? stdin.fileHandleForWriting.close()
+
+        startReader(
+            handle: stdout.fileHandleForReading,
+            group: readers,
+            append: buffer.appendStdout,
+            sink: stdoutSink
+        )
+        startReader(
+            handle: stderr.fileHandleForReading,
+            group: readers,
+            append: buffer.appendStderr,
+            sink: stderrSink
+        )
 
         let exitTask = Task {
             await waitForExit(process)
@@ -72,8 +98,11 @@ public enum ProcessRunner {
             }
         }
 
-        stdout.fileHandleForReading.readabilityHandler = nil
-        stderr.fileHandleForReading.readabilityHandler = nil
+        if timedOut {
+            try? stdout.fileHandleForReading.close()
+            try? stderr.fileHandleForReading.close()
+        }
+        await waitForReaders(readers, timeout: 2)
 
         let snapshot = buffer.snapshot()
         let code = timedOut ? Int32(124) : process.terminationStatus
@@ -89,10 +118,43 @@ public enum ProcessRunner {
         )
     }
 
+    private static func startReader(
+        handle: FileHandle,
+        group: DispatchGroup,
+        append: @escaping (String) -> Void,
+        sink: @escaping (String) -> Void
+    ) {
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            defer { group.leave() }
+            while true {
+                let data = handle.readData(ofLength: 8192)
+                if data.isEmpty { break }
+                guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { continue }
+                append(text)
+                sink(text)
+            }
+        }
+    }
+
     private static func waitForExit(_ process: Process) async {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let box = ContinuationBox(continuation)
+            process.terminationHandler = { _ in
+                process.terminationHandler = nil
+                box.resume()
+            }
+            if !process.isRunning {
+                process.terminationHandler = nil
+                box.resume()
+            }
+        }
+    }
+
+    private static func waitForReaders(_ group: DispatchGroup, timeout: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .utility).async {
-                process.waitUntilExit()
+                _ = group.wait(timeout: .now() + .seconds(timeout))
                 continuation.resume()
             }
         }
@@ -112,6 +174,23 @@ public enum ProcessRunner {
             let completed = await group.next() ?? false
             group.cancelAll()
             return completed
+        }
+    }
+
+    private final class ContinuationBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) {
+            self.continuation = continuation
+        }
+
+        func resume() {
+            lock.lock()
+            let current = continuation
+            continuation = nil
+            lock.unlock()
+            current?.resume()
         }
     }
 }

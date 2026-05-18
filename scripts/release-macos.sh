@@ -16,7 +16,7 @@ STAGE="$DIST/stage"
 PKG="$DIST/$PRODUCT-$VERSION-macos-arm64.pkg"
 MANIFEST="$DIST/$PRODUCT-$VERSION-macos-arm64.json"
 
-if [ "${SYNC_FROM_SOURCE:-1}" = "1" ]; then
+if [ "${SYNC_FROM_SOURCE:-0}" = "1" ]; then
   "$ROOT/scripts/sync-from-source.sh"
 fi
 

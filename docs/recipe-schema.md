@@ -6,6 +6,7 @@ A recipe is a JSON object with a name and a list of steps.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `type` | string | no | `sequence`, `formula`, `compound`, `pipeline`, or `parallel`. Default is `sequence`. |
 | `name` | string | yes | Recipe name. |
 | `description` | string | no | Human-readable description. |
 | `backend` | string | no | Default backend for steps. |
@@ -13,7 +14,10 @@ A recipe is a JSON object with a name and a list of steps.
 | `env` | object | no | Recipe-level environment values. |
 | `providers` | object | no | Custom provider definitions. |
 | `cloud` | object | no | Optional cloud behavior. |
-| `steps` | array | yes | Ordered or dependency-linked steps. |
+| `hooks` | object | no | Optional shell hooks around runs and steps. |
+| `max_parallel` | integer | no | Max parallelism for wave or child-recipe execution. |
+| `steps` | array | for `sequence` and `formula` | Ordered or dependency-linked steps. |
+| `recipes` | array | for `compound`, `pipeline`, and `parallel` | Child recipe nodes. |
 
 ## Step Fields
 
@@ -33,10 +37,59 @@ A recipe is a JSON object with a name and a list of steps.
 | `retry_backoff_ms` | integer | no | Wait time between attempts. |
 | `max_output_bytes` | integer | no | Output capture limit. Default is 5000000. |
 | `reasoning` | string | no | Provider reasoning effort when supported. |
+| `thinking` | string | no | Agent CLI thinking option when supported. |
 | `max_output_tokens` | integer | no | Provider output token cap when supported. |
+| `allowed_tools` | array | no | Agent CLI allow-list when supported. |
+| `disallowed_tools` | array | no | Agent CLI deny-list when supported. |
+| `expected_changes` | array | no | Repo-relative paths or globs the step is allowed to commit. |
 | `verify` | object | no | Deterministic verification requirements. |
 
 Each step must provide either `prompt` or `prompt_file`.
+
+## Recipe Node Fields
+
+Child recipe nodes are used by `compound`, `pipeline`, and `parallel`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `label` | string | no | Node label. Defaults to `recipe`. |
+| `recipe` | string | yes | Recipe name or safe recipe path to run. |
+| `depends_on` | array | no | Other node labels that must complete first. |
+| `vars` | object | no | Variables passed to the child recipe. |
+
+## Hook Fields
+
+```json
+{
+  "hooks": {
+    "before_run": ["echo starting"],
+    "before_step": ["echo step $MENTU_RECIPES_STEP"],
+    "after_step": ["echo done"],
+    "on_error": ["echo failed"],
+    "after_run": ["echo finished"]
+  }
+}
+```
+
+Hooks run through `/bin/sh` with `MENTU_RECIPES_*` context variables and are
+recorded in `run.json`.
+
+## Expected Changes
+
+```json
+{
+  "expected_changes": [
+    "Sources/",
+    "Tests/**/*.swift",
+    "README.md"
+  ]
+}
+```
+
+When a successful step declares `expected_changes` inside a git worktree, the
+runner commits matching dirty paths and writes unrelated dirty changes into a
+quarantine patch under the run directory. Absolute, home-rooted, and traversal
+entries are ignored.
 
 ## Cloud Fields
 

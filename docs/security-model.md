@@ -20,6 +20,10 @@ rule is simple: treat recipes like code.
 - Verification paths must stay inside the step directory.
 - Built-in OpenAI and DeepSeek key names are pinned to official API hosts.
 - Shell is explicit only and is never selected automatically.
+- Agent CLI environments are allow-listed by backend.
+- `expected_changes` can auto-commit intended files and quarantine unrelated
+  dirty files into the run directory for review.
+- Release scans can include built artifacts as well as source paths.
 
 ## Recommended Practice
 
@@ -28,4 +32,5 @@ rule is simple: treat recipes like code.
 - Do not commit `.env` files or run records.
 - Prefer provider-specific env names for custom providers.
 - Use deterministic verification for important file checks.
+- Use `expected_changes` on writing steps so unrelated edits are quarantined.
 - Run `mentu-recipes scan .` before publishing.

@@ -27,8 +27,15 @@ public struct RecipeStore: Sendable {
         guard !recipe.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw RecipeError.invalidRecipe("name is required")
         }
-        guard !recipe.steps.isEmpty else {
-            throw RecipeError.invalidRecipe("steps must not be empty")
+        let type = recipe.type ?? .sequence
+        if type == .sequence || type == .formula {
+            guard !recipe.steps.isEmpty else {
+                throw RecipeError.invalidRecipe("steps must not be empty")
+            }
+        } else {
+            guard !(recipe.recipes ?? []).isEmpty else {
+                throw RecipeError.invalidRecipe("recipes must not be empty for \(type.rawValue)")
+            }
         }
 
         var labels = Set<String>()
@@ -47,13 +54,19 @@ public struct RecipeStore: Sendable {
             }
         }
 
-        let known = Set(labels)
-        for step in recipe.steps {
-            for dep in step.dependsOn ?? [] where !known.contains(dep) {
-                throw RecipeError.invalidRecipe("step '\(step.label)' depends on unknown step '\(dep)'")
+        if !recipe.steps.isEmpty {
+            let known = Set(labels)
+            for step in recipe.steps {
+                for dep in step.dependsOn ?? [] where !known.contains(dep) {
+                    throw RecipeError.invalidRecipe("step '\(step.label)' depends on unknown step '\(dep)'")
+                }
             }
+            _ = try topologicalOrder(recipe.steps)
         }
-        _ = try topologicalOrder(recipe.steps)
+
+        if let nodes = recipe.recipes {
+            _ = try topologicalOrder(nodes)
+        }
     }
 
     public func topologicalOrder(_ steps: [RecipeStep]) throws -> [RecipeStep] {
@@ -78,6 +91,36 @@ public struct RecipeStore: Sendable {
 
         for step in steps {
             try visit(step.label)
+        }
+        return ordered
+    }
+
+    public func topologicalOrder(_ nodes: [RecipeNode]) throws -> [RecipeNode] {
+        let pairs = nodes.map { (($0.label ?? $0.recipe), $0) }
+        let byLabel = Dictionary(uniqueKeysWithValues: pairs)
+        var temporary = Set<String>()
+        var permanent = Set<String>()
+        var ordered: [RecipeNode] = []
+
+        func visit(_ label: String) throws {
+            if permanent.contains(label) { return }
+            if temporary.contains(label) { throw RecipeError.dependencyCycle }
+            guard let node = byLabel[label] else { return }
+
+            temporary.insert(label)
+            for dep in node.dependsOn ?? [] {
+                guard byLabel[dep] != nil else {
+                    throw RecipeError.invalidRecipe("recipe node '\(label)' depends on unknown node '\(dep)'")
+                }
+                try visit(dep)
+            }
+            temporary.remove(label)
+            permanent.insert(label)
+            ordered.append(node)
+        }
+
+        for (label, _) in pairs {
+            try visit(label)
         }
         return ordered
     }

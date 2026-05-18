@@ -130,9 +130,49 @@ final class MentuRecipesCoreTests: XCTestCase {
 
     func testAdapterRegistryMetadata() {
         XCTAssertEqual(AdapterRegistry.adapter(named: "shell")?.completionPolicy, .shellExitCode)
+        XCTAssertEqual(AdapterRegistry.adapter(named: "shell")?.systemContextHandling, .ignored)
         XCTAssertEqual(AdapterRegistry.adapter(named: "openai")?.executionKind, "llm-http")
+        XCTAssertEqual(AdapterRegistry.adapter(named: "openai")?.streamFormat, .openAISSE)
         XCTAssertEqual(AdapterRegistry.adapter(named: "deepseek")?.executionKind, "llm-http")
         XCTAssertEqual(AdapterRegistry.adapter(named: "claude")?.executionKind, "agent-cli")
+        XCTAssertEqual(AdapterRegistry.adapter(named: "claude")?.streamFormat, .claudeJSON)
+        XCTAssertEqual(AdapterRegistry.adapter(named: "codex")?.executionKind, "agent-cli")
+        XCTAssertEqual(AdapterRegistry.adapter(named: "codex")?.streamFormat, .codexJSON)
+        XCTAssertEqual(AdapterRegistry.adapter(named: "codex")?.completionPolicy, .providerCompleteEvent)
+    }
+
+    func testCodexJSONParserSuppressesCLIChrome() {
+        XCTAssertTrue(CodexJSONParser.parseLine("OpenAI Codex v0.130.0").isEmpty)
+        XCTAssertTrue(CodexJSONParser.parseLine("2026-05-18T02:08:44Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt").isEmpty)
+        XCTAssertTrue(CodexJSONParser.parseLine("<html>").isEmpty)
+
+        let message = CodexJSONParser.parseLine(#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello from codex"}}"#)
+        XCTAssertEqual(message, [.text("hello from codex\n")])
+
+        let complete = CodexJSONParser.parseLine(#"{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":7}}"#)
+        XCTAssertEqual(complete, [.complete(inputTokens: 11, outputTokens: 7)])
+
+        let nestedError = CodexJSONParser.parseLine(#"{"type":"error","message":"{\"error\":{\"message\":\"model is not supported\"}}"}"#)
+        XCTAssertEqual(nestedError, [.error("model is not supported")])
+    }
+
+    func testClaudeJSONParserStreamsTextAndSuppressesDiagnostics() {
+        XCTAssertTrue(ClaudeJSONParser.parseLineForTest("2026-05-18T02:08:44Z  WARN claude_core::session: noisy").isEmpty)
+        XCTAssertTrue(ClaudeJSONParser.parseLineForTest("event: message_start").isEmpty)
+
+        let message = ClaudeJSONParser.parseLineForTest(#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello from claude\n"}]}}"#)
+        XCTAssertEqual(message, [.text("hello from claude\n")])
+
+        let complete = ClaudeJSONParser.parseLineForTest(#"{"type":"result","usage":{"input_tokens":3,"output_tokens":5}}"#)
+        XCTAssertEqual(complete, [.complete(inputTokens: 3, outputTokens: 5)])
+    }
+
+    func testProviderLogSanitizerSuppressesAgentDiagnosticsButKeepsShellRaw() {
+        XCTAssertTrue(ProviderLogSanitizer.isSuppressibleAgentDiagnostic("OpenAI Codex v0.130.0", backend: "codex"))
+        XCTAssertTrue(ProviderLogSanitizer.isSuppressibleAgentDiagnostic("2026-05-18T02:08:44Z ERROR codex_core::session: failed to load skill x", backend: "codex"))
+        XCTAssertTrue(ProviderLogSanitizer.isSuppressibleAgentDiagnostic("2026-05-18T02:08:44Z WARN codex_core::session_startup_prewarm: startup websocket prewarm setup failed: {\"error\":{\"message\":\"model is not supported\"}}", backend: "codex"))
+        XCTAssertEqual(ProviderLogSanitizer.userActionableError("ERROR: API key auth is missing"), "ERROR: API key auth is missing")
+        XCTAssertEqual(ShellAdapter().streamFormat, .plainText)
     }
 
     func testClaudeAgentEnvironmentDoesNotInheritOtherProviderSecrets() {
@@ -204,6 +244,19 @@ final class MentuRecipesCoreTests: XCTestCase {
         XCTAssertTrue(findings.contains { $0.reason == "protected internal path" })
     }
 
+    func testReleaseScannerFindsBinaryArtifactLeaks() throws {
+        let root = try tempDir()
+        let artifact = root.appendingPathComponent("mentu-recipes.bin")
+        var data = Data([0x00, 0xff, 0x7f, 0x01])
+        data.append(Data("safe prefix ".utf8))
+        data.append(Data(["Ghi", "dra"].joined().utf8))
+        data.append(Data(" suffix".utf8))
+        try data.write(to: artifact)
+
+        let findings = ReleaseScanner.scan(paths: [artifact])
+        XCTAssertTrue(findings.contains { $0.file == "mentu-recipes.bin" && $0.reason.contains("protected internal term") })
+    }
+
     func testMockCloudClient() async throws {
         MockURLProtocol.responses = [
             "/v1/recipes/runs/start": #"{"runId":"cloud-run","windowStart":"2026-01-01T00:00:00Z"}"#,
@@ -224,10 +277,123 @@ final class MentuRecipesCoreTests: XCTestCase {
         XCTAssertEqual(end.status, "updated")
     }
 
+    func testGitAutoCommitAndQuarantine() async throws {
+        let root = try tempDir()
+        _ = try await git(["init"], cwd: root)
+        _ = try await git(["config", "user.name", "Mentu Recipes Test"], cwd: root)
+        _ = try await git(["config", "user.email", "recipes-test@mentu.ai"], cwd: root)
+        try "seed\n".write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        _ = try await git(["add", "README.md"], cwd: root)
+        _ = try await git(["commit", "-m", "seed"], cwd: root)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "git-safety",
+          "steps": [
+            {
+              "label": "write",
+              "backend": "shell",
+              "prompt": "echo EXPECTED_COMPLETE > expected.txt && echo surprise > unexpected.txt && echo EXPECTED_COMPLETE",
+              "completion_keyword": "EXPECTED_COMPLETE",
+              "expected_changes": ["expected.txt"],
+              "timeout": 5
+            }
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/git-safety.json"), atomically: true, encoding: .utf8)
+
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("git-safety")
+        XCTAssertEqual(result.outcome, "ok")
+        let step = try XCTUnwrap(result.steps.first)
+        XCTAssertNotNil(step.git?.committedHash)
+        XCTAssertEqual(step.git?.quarantineFiles.count, 1)
+        let committed = try await git(["show", "--name-only", "--format=", "HEAD"], cwd: root)
+        XCTAssertTrue(committed.stdout.contains("expected.txt"))
+        XCTAssertFalse(committed.stdout.contains("unexpected.txt"))
+    }
+
+    func testHooksAreRecorded() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "hooks",
+          "hooks": {
+            "before_step": ["echo before > hook-before.txt"],
+            "after_step": ["echo after > hook-after.txt"]
+          },
+          "steps": [
+            {
+              "label": "one",
+              "backend": "shell",
+              "prompt": "echo HOOK_COMPLETE",
+              "completion_keyword": "HOOK_COMPLETE",
+              "timeout": 5
+            }
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/hooks.json"), atomically: true, encoding: .utf8)
+
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("hooks")
+        XCTAssertEqual(result.outcome, "ok")
+        XCTAssertEqual(result.steps.first?.hooks?.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("hook-before.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("hook-after.txt").path))
+    }
+
+    func testDAGStepsRunInParallelWaves() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "dag",
+          "max_parallel": 2,
+          "steps": [
+            {"label":"a","backend":"shell","prompt":"sleep 1; echo A > a.txt","timeout":5},
+            {"label":"b","backend":"shell","prompt":"sleep 1; echo B > b.txt","timeout":5},
+            {"label":"c","backend":"shell","depends_on":["a","b"],"prompt":"cat a.txt b.txt > c.txt","timeout":5}
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/dag.json"), atomically: true, encoding: .utf8)
+
+        let start = Date()
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true, maxParallel: 2)).run("dag")
+        XCTAssertEqual(result.outcome, "ok")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2.5)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("c.txt").path))
+    }
+
+    func testRunReporterRendersMarkdownAndCSV() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {"name":"report-demo","steps":[{"label":"one","backend":"shell","prompt":"echo REPORT_COMPLETE","completion_keyword":"REPORT_COMPLETE"}]}
+        """.write(to: root.appendingPathComponent(".mentu/recipes/report-demo.json"), atomically: true, encoding: .utf8)
+
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("report-demo")
+        let loaded = try RunReporter.load(runId: result.runId, workspace: root)
+        XCTAssertTrue(try RunReporter.render(loaded, format: .markdown).contains("report-demo"))
+        let csv = try RunReporter.render(loaded, format: .csv)
+        XCTAssertTrue(csv.contains("report-demo"))
+        XCTAssertTrue(csv.contains("one"))
+    }
+
     private func tempDir() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mentu-recipes-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func git(_ args: [String], cwd: URL) async throws -> AdapterResult {
+        try await ProcessRunner.run(
+            executable: ProcessRunner.findExecutable("git") ?? "/usr/bin/git",
+            arguments: args,
+            env: ProcessInfo.processInfo.environment,
+            workingDirectory: cwd,
+            timeout: 30,
+            maxOutputBytes: 1_000_000,
+            eventSink: { _ in }
+        )
     }
 }
 

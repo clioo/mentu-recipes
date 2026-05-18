@@ -10,19 +10,13 @@ if [ ! -f "$SOURCE_ROOT/Package.swift" ] || [ ! -d "$SOURCE_ROOT/Sources/MentuRe
   exit 2
 fi
 
-for item in Package.swift LICENSE README.md .gitignore Sources Tests .mentu; do
+for item in Package.swift Sources Tests; do
   /bin/rm -rf "$SHIP_ROOT/$item"
   /bin/cp -R "$SOURCE_ROOT/$item" "$SHIP_ROOT/$item"
 done
 
 /bin/rm -rf \
   "$SHIP_ROOT/.build" \
-  "$SHIP_ROOT/dist" \
-  "$SHIP_ROOT/.mentu/runs" \
-  "$SHIP_ROOT/.mentu/cache" \
-  "$SHIP_ROOT/.mentu/state" \
-  "$SHIP_ROOT/.mentu/logs" \
-  "$SHIP_ROOT/.mentu/tmp" \
-  "$SHIP_ROOT/.mentu/training"
+  "$SHIP_ROOT/dist"
 
-echo "synced mentu-recipes source into ship gate"
+echo "synced public runtime files into ship gate"

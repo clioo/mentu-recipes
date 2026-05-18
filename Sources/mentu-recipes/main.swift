@@ -18,6 +18,8 @@ enum CLI {
                 try check(args)
             case "run":
                 try await run(args)
+            case "report":
+                try report(args)
             case "adapters":
                 adapters()
             case "vault":
@@ -65,8 +67,9 @@ enum CLI {
             backend: parsed["backend"],
             model: parsed["model"],
             vars: vars,
-            cloudEnabled: parsed["no-cloud"] != "true",
-            quiet: parsed["quiet"] == "true"
+            cloudEnabled: parsed["cloud"] == "true",
+            quiet: parsed["quiet"] == "true",
+            maxParallel: parsed["max-parallel"].flatMap(Int.init)
         ))
         let record = try await runner.run(name)
         let ok = record.outcome == "ok"
@@ -75,12 +78,21 @@ enum CLI {
         if !ok { throw RecipeError.failed("Recipe failed") }
     }
 
+    static func report(_ args: [String]) throws {
+        guard let runId = args.first else { throw RecipeError.failed("Usage: mentu-recipes report <run-id> [--format markdown|json|csv] [--workspace PATH]") }
+        let parsed = parseOptions(Array(args.dropFirst()))
+        let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
+        let format = ReportFormat(rawValue: parsed["format"] ?? "markdown") ?? .markdown
+        let record = try RunReporter.load(runId: runId, workspace: workspace)
+        print(try RunReporter.render(record, format: format))
+    }
+
     static func adapters() {
         let env = ProcessInfo.processInfo.environment
         for adapter in AdapterRegistry.allAdapters() {
             let available = adapter.isAvailable(env: env) ? "available" : "unavailable"
             let auto = adapter.isAutoDetectable ? "auto" : "explicit"
-            print("\(adapter.name)\t\(adapter.executionKind)\t\(available)\t\(auto)")
+            print("\(adapter.name)\t\(adapter.executionKind)\t\(adapter.streamFormat.rawValue)\t\(adapter.systemContextHandling.rawValue)\t\(available)\t\(auto)")
         }
     }
 
@@ -109,8 +121,21 @@ enum CLI {
     }
 
     static func scan(_ args: [String]) throws {
-        let root = URL(fileURLWithPath: args.first ?? FileManager.default.currentDirectoryPath)
-        let findings = ReleaseScanner.scan(root: root)
+        var root = FileManager.default.currentDirectoryPath
+        var artifacts: [URL] = []
+        var i = 0
+        while i < args.count {
+            if args[i] == "--artifact", i + 1 < args.count {
+                artifacts.append(URL(fileURLWithPath: args[i + 1]))
+                i += 2
+            } else if !args[i].hasPrefix("--") {
+                root = args[i]
+                i += 1
+            } else {
+                i += 1
+            }
+        }
+        let findings = ReleaseScanner.scan(paths: [URL(fileURLWithPath: root)] + artifacts)
         if findings.isEmpty {
             print("✓ release scan passed")
             return
@@ -128,7 +153,7 @@ enum CLI {
         while i < args.count {
             let arg = args[i]
             switch arg {
-            case "--workspace", "--backend", "--model":
+            case "--workspace", "--backend", "--model", "--format", "--max-parallel":
                 if i + 1 < args.count {
                     result[String(arg.dropFirst(2))] = args[i + 1]
                     i += 2
@@ -142,6 +167,8 @@ enum CLI {
                 }
             case "--no-cloud":
                 result["no-cloud"] = "true"
+            case "--cloud":
+                result["cloud"] = "true"
             case "--quiet":
                 result["quiet"] = "true"
             default:
@@ -178,10 +205,11 @@ enum CLI {
         Usage:
           mentu-recipes init
           mentu-recipes check <recipe-or-path>
-          mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--no-cloud] [--var KEY=VALUE]
+          mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
+          mentu-recipes report <run-id> [--format markdown|json|csv]
           mentu-recipes adapters
           mentu-recipes vault <set|get|list|delete> ...
-          mentu-recipes scan [path]
+          mentu-recipes scan [path] [--artifact PATH]
         """)
     }
 }

@@ -1,7 +1,7 @@
 # Cloud Hooks
 
-Mentu Recipes works offline. Cloud hooks are optional and activate when a Mentu
-API key is available.
+Mentu Recipes works offline. Cloud hooks are optional and activate only when a
+run or recipe explicitly opts in and a Mentu API key is available.
 
 ## Configure A Key
 
@@ -15,10 +15,10 @@ Or set:
 export MENTU_API_KEY="..."
 ```
 
-## Disable Cloud For A Run
+## Enable Cloud For A Run
 
 ```sh
-mentu-recipes run my-recipe --no-cloud
+mentu-recipes run my-recipe --cloud
 ```
 
 ## Recipe Cloud Config
@@ -32,8 +32,9 @@ mentu-recipes run my-recipe --no-cloud
 }
 ```
 
-`enabled` controls run start and end calls. `evaluate_steps` controls whether
-step output tails are sent for cloud evaluation.
+`enabled` controls run start and end calls. The CLI `--cloud` flag also enables
+run hooks for a single invocation. `evaluate_steps` controls whether step output
+tails are sent for cloud evaluation.
 
 ## Local-Only Behavior
 

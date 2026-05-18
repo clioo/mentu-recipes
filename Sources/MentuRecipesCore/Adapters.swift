@@ -6,6 +6,20 @@ public enum CompletionPolicy: Sendable, Equatable {
     case shellExitCode
 }
 
+public enum StreamFormat: String, Sendable, Codable {
+    case claudeJSON = "claude_json"
+    case codexJSON = "codex_json"
+    case openAISSE = "openai_sse"
+    case plainText = "plain_text"
+    case ollamaJSON = "ollama_json"
+}
+
+public enum SystemContextHandling: String, Sendable, Codable {
+    case native
+    case foldedIntoPrompt = "folded_into_prompt"
+    case ignored
+}
+
 public struct AdapterRequest: Sendable {
     public let prompt: String
     public let systemContext: String?
@@ -14,8 +28,42 @@ public struct AdapterRequest: Sendable {
     public let timeout: Int
     public let maxOutputBytes: Int
     public let reasoning: String?
+    public let thinking: String?
     public let maxOutputTokens: Int?
+    public let allowedTools: [String]?
+    public let disallowedTools: [String]?
+    public let sessionName: String?
     public let workingDirectory: URL
+
+    public init(
+        prompt: String,
+        systemContext: String? = nil,
+        model: String? = nil,
+        env: [String: String],
+        timeout: Int,
+        maxOutputBytes: Int,
+        reasoning: String? = nil,
+        thinking: String? = nil,
+        maxOutputTokens: Int? = nil,
+        allowedTools: [String]? = nil,
+        disallowedTools: [String]? = nil,
+        sessionName: String? = nil,
+        workingDirectory: URL
+    ) {
+        self.prompt = prompt
+        self.systemContext = systemContext
+        self.model = model
+        self.env = env
+        self.timeout = timeout
+        self.maxOutputBytes = maxOutputBytes
+        self.reasoning = reasoning
+        self.thinking = thinking
+        self.maxOutputTokens = maxOutputTokens
+        self.allowedTools = allowedTools
+        self.disallowedTools = disallowedTools
+        self.sessionName = sessionName
+        self.workingDirectory = workingDirectory
+    }
 }
 
 public struct AdapterResult: Sendable {
@@ -30,7 +78,9 @@ public struct AdapterResult: Sendable {
 public protocol BackendAdapter: Sendable {
     var name: String { get }
     var executionKind: String { get }
+    var streamFormat: StreamFormat { get }
     var completionPolicy: CompletionPolicy { get }
+    var systemContextHandling: SystemContextHandling { get }
     var isAutoDetectable: Bool { get }
     func isAvailable(env: [String: String]) -> Bool
     func execute(_ request: AdapterRequest, eventSink: @escaping (String) -> Void) async throws -> AdapterResult
@@ -58,6 +108,8 @@ public enum AdapterRegistry {
             return OpenAIChatAdapter.ollama()
         case "claude":
             return ClaudeCLIAdapter()
+        case "codex":
+            return CodexCLIAdapter()
         default:
             return nil
         }
@@ -67,6 +119,7 @@ public enum AdapterRegistry {
         let candidates: [BackendAdapter] = [
             OpenAIResponsesAdapter(),
             ClaudeCLIAdapter(),
+            CodexCLIAdapter(),
             OpenAIChatAdapter.deepSeek(),
             OpenAIChatAdapter.ollama()
         ]
@@ -80,7 +133,8 @@ public enum AdapterRegistry {
             OpenAIChatAdapter.openAIChat(),
             OpenAIChatAdapter.deepSeek(),
             OpenAIChatAdapter.ollama(),
-            ClaudeCLIAdapter()
+            ClaudeCLIAdapter(),
+            CodexCLIAdapter()
         ]
     }
 
@@ -107,6 +161,9 @@ public enum AdapterRegistry {
         case .shell:
             return ShellAdapter()
         case .cli:
+            if normalize(name) == "codex" {
+                return CodexCLIAdapter()
+            }
             return ClaudeCLIAdapter(name: name)
         }
     }

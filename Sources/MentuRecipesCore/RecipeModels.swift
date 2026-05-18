@@ -1,6 +1,7 @@
 import Foundation
 
 public struct RecipeDefinition: Codable, Sendable {
+    public let type: RecipeType?
     public let name: String
     public let description: String?
     public let backend: String?
@@ -8,9 +9,13 @@ public struct RecipeDefinition: Codable, Sendable {
     public let env: [String: String]?
     public let providers: [String: ProviderConfig]?
     public let cloud: CloudRecipeConfig?
+    public let hooks: HookConfig?
+    public let maxParallel: Int?
     public let steps: [RecipeStep]
+    public let recipes: [RecipeNode]?
 
     public init(
+        type: RecipeType? = nil,
         name: String,
         description: String? = nil,
         backend: String? = nil,
@@ -18,8 +23,12 @@ public struct RecipeDefinition: Codable, Sendable {
         env: [String: String]? = nil,
         providers: [String: ProviderConfig]? = nil,
         cloud: CloudRecipeConfig? = nil,
-        steps: [RecipeStep]
+        hooks: HookConfig? = nil,
+        maxParallel: Int? = nil,
+        steps: [RecipeStep] = [],
+        recipes: [RecipeNode]? = nil
     ) {
+        self.type = type
         self.name = name
         self.description = description
         self.backend = backend
@@ -27,7 +36,51 @@ public struct RecipeDefinition: Codable, Sendable {
         self.env = env
         self.providers = providers
         self.cloud = cloud
+        self.hooks = hooks
+        self.maxParallel = maxParallel
         self.steps = steps
+        self.recipes = recipes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type, name, description, backend, model, env, providers, cloud, hooks, steps, recipes
+        case maxParallel = "max_parallel"
+    }
+}
+
+public enum RecipeType: String, Codable, Sendable {
+    case formula
+    case sequence
+    case compound
+    case pipeline
+    case parallel
+}
+
+public struct RecipeNode: Codable, Sendable {
+    public let label: String?
+    public let recipe: String
+    public let dependsOn: [String]?
+    public let vars: [String: String]?
+
+    enum CodingKeys: String, CodingKey {
+        case label, recipe, vars
+        case dependsOn = "depends_on"
+    }
+}
+
+public struct HookConfig: Codable, Sendable {
+    public let beforeRun: [String]?
+    public let beforeStep: [String]?
+    public let afterStep: [String]?
+    public let onError: [String]?
+    public let afterRun: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case beforeRun = "before_run"
+        case beforeStep = "before_step"
+        case afterStep = "after_step"
+        case onError = "on_error"
+        case afterRun = "after_run"
     }
 }
 
@@ -79,8 +132,56 @@ public struct RecipeStep: Codable, Sendable {
     public let retryBackoffMs: Int?
     public let maxOutputBytes: Int?
     public let reasoning: String?
+    public let thinking: String?
     public let maxOutputTokens: Int?
+    public let allowedTools: [String]?
+    public let disallowedTools: [String]?
+    public let expectedChanges: [String]?
     public let verify: VerifyRequirements?
+
+    public init(
+        label: String,
+        backend: String? = nil,
+        model: String? = nil,
+        prompt: String? = nil,
+        promptFile: String? = nil,
+        dir: String? = nil,
+        env: [String: String]? = nil,
+        timeout: Int? = nil,
+        completionKeyword: String? = nil,
+        dependsOn: [String]? = nil,
+        maxRetries: Int? = nil,
+        retryBackoffMs: Int? = nil,
+        maxOutputBytes: Int? = nil,
+        reasoning: String? = nil,
+        thinking: String? = nil,
+        maxOutputTokens: Int? = nil,
+        allowedTools: [String]? = nil,
+        disallowedTools: [String]? = nil,
+        expectedChanges: [String]? = nil,
+        verify: VerifyRequirements? = nil
+    ) {
+        self.label = label
+        self.backend = backend
+        self.model = model
+        self.prompt = prompt
+        self.promptFile = promptFile
+        self.dir = dir
+        self.env = env
+        self.timeout = timeout
+        self.completionKeyword = completionKeyword
+        self.dependsOn = dependsOn
+        self.maxRetries = maxRetries
+        self.retryBackoffMs = retryBackoffMs
+        self.maxOutputBytes = maxOutputBytes
+        self.reasoning = reasoning
+        self.thinking = thinking
+        self.maxOutputTokens = maxOutputTokens
+        self.allowedTools = allowedTools
+        self.disallowedTools = disallowedTools
+        self.expectedChanges = expectedChanges
+        self.verify = verify
+    }
 
     enum CodingKeys: String, CodingKey {
         case label, backend, model, prompt, dir, env, timeout
@@ -91,7 +192,11 @@ public struct RecipeStep: Codable, Sendable {
         case retryBackoffMs = "retry_backoff_ms"
         case maxOutputBytes = "max_output_bytes"
         case reasoning
+        case thinking
         case maxOutputTokens = "max_output_tokens"
+        case allowedTools = "allowed_tools"
+        case disallowedTools = "disallowed_tools"
+        case expectedChanges = "expected_changes"
         case verify
     }
 }
@@ -120,12 +225,14 @@ public struct VerifyRequirements: Codable, Sendable {
     public let grepAbsent: [GrepAbsent]?
     public let fileAbsent: [FileAbsent]?
     public let gitCleanOutside: [String]?
+    public let commands: [String]?
 
     enum CodingKeys: String, CodingKey {
         case grepPresent = "grep_present"
         case grepAbsent = "grep_absent"
         case fileAbsent = "file_absent"
         case gitCleanOutside = "git_clean_outside"
+        case commands
     }
 }
 
@@ -138,6 +245,7 @@ public struct RunOptions: Sendable {
     public let cloudEnabled: Bool
     public let cloudBaseURL: URL
     public let quiet: Bool
+    public let maxParallel: Int?
 
     public init(
         workspace: URL,
@@ -145,9 +253,10 @@ public struct RunOptions: Sendable {
         backend: String? = nil,
         model: String? = nil,
         vars: [String: String] = [:],
-        cloudEnabled: Bool = true,
+        cloudEnabled: Bool = false,
         cloudBaseURL: URL = URL(string: "https://api.mentu.ai")!,
-        quiet: Bool = false
+        quiet: Bool = false,
+        maxParallel: Int? = nil
     ) {
         self.workspace = workspace
         self.home = home
@@ -157,6 +266,7 @@ public struct RunOptions: Sendable {
         self.cloudEnabled = cloudEnabled
         self.cloudBaseURL = cloudBaseURL
         self.quiet = quiet
+        self.maxParallel = maxParallel
     }
 }
 

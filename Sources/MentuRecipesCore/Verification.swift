@@ -34,6 +34,21 @@ public enum Verification {
         if let allowed = requirements.gitCleanOutside {
             try await verifyGitCleanOutside(allowed, stepDir: stepDir)
         }
+
+        for command in requirements.commands ?? [] {
+            let result = try await ProcessRunner.run(
+                executable: "/bin/sh",
+                arguments: ["-c", command],
+                env: ProcessInfo.processInfo.environment,
+                workingDirectory: stepDir,
+                timeout: 300,
+                maxOutputBytes: 1_000_000,
+                eventSink: { _ in }
+            )
+            if result.exitCode != 0 {
+                throw RecipeError.failed("Verification command failed: \(command)\n\(result.stderr)")
+            }
+        }
     }
 
     private static func read(_ relative: String, from stepDir: URL) throws -> String {

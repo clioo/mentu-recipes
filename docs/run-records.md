@@ -17,6 +17,7 @@ The run record includes:
 - cloud mode
 - optional cloud run ID
 - step records
+- run-level hook records
 
 ## Step Output Files
 
@@ -27,23 +28,31 @@ Each step writes:
 
 The step record points to those file names.
 
+Steps may also include:
+
+- `completion_method`
+- token counts reported by a provider
+- hook records
+- a `git` record with committed paths, commit hash, and quarantined patch files
+
 ## Example Shape
 
 ```json
 {
-  "runId": "run_20260517220000_abcd1234",
-  "recipeName": "shell-smoke",
+  "run_id": "run_20260517220000_abcd1234",
+  "recipe_name": "shell-smoke",
   "outcome": "ok",
-  "cloudMode": "local-only",
+  "cloud_mode": "local-only",
   "steps": [
     {
       "label": "say-hello",
       "backend": "shell",
-      "exitCode": 0,
-      "localComplete": true,
+      "exit_code": 0,
+      "completion_method": "keyword_output",
+      "local_complete": true,
       "attempts": 1,
-      "outputFile": "say-hello.stdout",
-      "errorFile": "say-hello.stderr"
+      "output_file": "say-hello.stdout",
+      "error_file": "say-hello.stderr"
     }
   ]
 }

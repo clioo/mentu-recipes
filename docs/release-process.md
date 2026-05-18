@@ -20,6 +20,9 @@ The source gate checks for:
 - confidential markers
 - protected local state paths
 
+The source gate runs from the public repo as checked out. It does not depend on
+a sibling private source tree.
+
 ## macOS Package Gate
 
 The release script builds, strips, signs, validates, packages, notarizes, and
@@ -29,12 +32,25 @@ staples the package:
 ./scripts/release-macos.sh
 ```
 
+Maintainers who intentionally want to refresh the public runtime from a sibling
+source checkout can opt in:
+
+```sh
+SYNC_FROM_SOURCE=1 ./scripts/release-macos.sh
+```
+
+The sync step copies only `Package.swift`, `Sources`, and `Tests`; public docs,
+license, examples, and release materials stay owned by this repository.
+
 The package gate scans:
 
 - compiled binary strings
 - compiled binary symbols
 - expanded package payload strings
 - package payload shape
+
+Scan staged, stripped artifacts. Raw SwiftPM release binaries can include local
+build paths before `strip -x`, and the scanner will correctly reject them.
 
 ## Published Artifacts
 

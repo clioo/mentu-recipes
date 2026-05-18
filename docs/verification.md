@@ -63,3 +63,18 @@ for checks that do not require a model.
 ```
 
 Verification paths are relative to the step directory and cannot escape it.
+
+## Commands
+
+```json
+{
+  "verify": {
+    "commands": [
+      "swift test",
+      "swift run mentu-recipes scan ."
+    ]
+  }
+}
+```
+
+Verification commands run from the step directory with a 300 second timeout.

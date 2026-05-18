@@ -7,7 +7,8 @@ local model servers, or shell steps.
 
 The local runner is an execution kernel: it handles recipe discovery, prompt
 rendering, provider-neutral execution, retries, timeouts, vault/env resolution,
-run logs, and deterministic verification.
+run logs, deterministic verification, hooks, DAG/parallel execution, and
+expected-change commit quarantine.
 
 Mentu Intelligence lives behind `api.mentu.ai`. When configured, it can add
 cloud verdicts, trust scoring, completion checks, correction learning, feature
@@ -93,12 +94,13 @@ review, and run them from CI or a local terminal.
 ```sh
 mentu-recipes init
 mentu-recipes check <recipe-or-path>
-mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--no-cloud] [--var KEY=VALUE]
-mentu-recipes adapters
-printf '%s' "$SECRET" | mentu-recipes vault set <key>
-mentu-recipes vault get <key>
-mentu-recipes vault list
-mentu-recipes scan [path]
+          mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
+          mentu-recipes report <run-id> [--format markdown|json|csv]
+          mentu-recipes adapters
+          printf '%s' "$SECRET" | mentu-recipes vault set <key>
+          mentu-recipes vault get <key>
+          mentu-recipes vault list
+          mentu-recipes scan [path] [--artifact PATH]
 ```
 
 ## Built-In Backends
@@ -106,6 +108,7 @@ mentu-recipes scan [path]
 - `shell`: runs an explicit local shell command and succeeds by exit code.
 - `openai`: uses the OpenAI Responses API for ChatGPT and GPT models.
 - `claude`: uses the local Claude CLI when installed.
+- `codex`: uses the local Codex CLI when installed.
 - `deepseek`: uses DeepSeek through an OpenAI-compatible chat API.
 - `openai-compatible`: can target providers with compatible chat APIs.
 
@@ -134,15 +137,16 @@ workspace; choose the workspace root intentionally with `--workspace`.
 
 ## Cloud Mode
 
-Cloud mode is automatic when a Mentu API key is available. Disable it with:
+Cloud mode is local-only by default. Enable run tracking explicitly with:
 
 ```sh
-mentu-recipes run my-recipe --no-cloud
+mentu-recipes run my-recipe --cloud
 ```
 
-Cloud failures do not stop local execution. Runs are marked local-only when
-Mentu Intelligence is unavailable. Step output is not sent for cloud evaluation
-unless a recipe explicitly sets `"cloud": { "evaluate_steps": true }`.
+A recipe can also opt in with `"cloud": { "enabled": true }`. Cloud failures do
+not stop local execution. Runs are marked local-only when Mentu Intelligence is
+unavailable. Step output is not sent for cloud evaluation unless a recipe
+explicitly sets `"cloud": { "evaluate_steps": true }`.
 
 ## Security Boundary
 
@@ -153,7 +157,8 @@ recipes before running them.
 The runner rejects prompt paths outside configured prompt roots and rejects step
 working directories outside the selected workspace. Provider credentials are
 read from environment variables or vault keys and are not written to run logs by
-the runner.
+the runner. Built-in provider credentials are pinned to their official hosts so
+a custom `base_url` cannot silently receive an OpenAI or DeepSeek key.
 
 The public repository is intentionally limited to the local recipe runner. Mentu
 private intelligence remains in the cloud API and is not distributed in this
@@ -170,8 +175,10 @@ swift run mentu-recipes scan .
 The scanner fails on private paths, likely secrets, confidential markers, and
 protected Mentu platform terms that should not be present in the public repo.
 
-For macOS package releases, the ship scripts also scan the compiled binary and
-expanded package payload before notarization.
+For macOS package releases, the ship scripts also scan the stripped staging
+binary and expanded package payload before notarization. Raw SwiftPM release
+binaries can contain local build paths before stripping and should not be
+published directly.
 
 ## License
 

@@ -3,7 +3,9 @@ import Foundation
 public struct OpenAIResponsesAdapter: BackendAdapter {
     public let name: String
     public let executionKind = "llm-http"
+    public let streamFormat: StreamFormat = .openAISSE
     public let completionPolicy: CompletionPolicy = .providerCompleteEvent
+    public let systemContextHandling: SystemContextHandling = .native
     public let isAutoDetectable = true
     public let baseURL: String
     public let apiKeyEnv: String
@@ -28,7 +30,7 @@ public struct OpenAIResponsesAdapter: BackendAdapter {
     }
 
     public func isAvailable(env: [String: String]) -> Bool {
-        credential(from: env) != nil
+        env[apiKeyEnv]?.isEmpty == false
     }
 
     public func execute(_ request: AdapterRequest, eventSink: @escaping (String) -> Void) async throws -> AdapterResult {
@@ -127,7 +129,9 @@ public struct OpenAIResponsesAdapter: BackendAdapter {
 public struct OpenAIChatAdapter: BackendAdapter {
     public let name: String
     public let executionKind = "llm-http"
+    public let streamFormat: StreamFormat = .openAISSE
     public let completionPolicy: CompletionPolicy = .providerCompleteEvent
+    public let systemContextHandling: SystemContextHandling = .native
     public let isAutoDetectable: Bool
     public let baseURL: String
     public let apiKeyEnv: String
@@ -191,7 +195,7 @@ public struct OpenAIChatAdapter: BackendAdapter {
 
     public func isAvailable(env: [String: String]) -> Bool {
         if !requiresAuth { return true }
-        return credential(from: env) != nil
+        return env[apiKeyEnv]?.isEmpty == false
     }
 
     public func execute(_ request: AdapterRequest, eventSink: @escaping (String) -> Void) async throws -> AdapterResult {
@@ -384,8 +388,8 @@ public enum SSEClient {
                 inputTokens = inputTokens ?? inTokens
                 outputTokens = outputTokens ?? outTokens
             case .error(let message):
-                buffer.appendStderr(message)
-                eventSink("\n[provider-error] \(message)\n")
+                buffer.appendStderr("provider-error: \(message)\n")
+                eventSink("Error: \(message)\n")
             }
         }
 

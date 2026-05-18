@@ -13,6 +13,7 @@ recipe level, step level, or CLI level.
 | `deepseek` | HTTP LLM | Uses DeepSeek chat completions. |
 | `ollama` | local HTTP LLM | Uses `http://localhost:11434/v1`. |
 | `claude` | CLI agent | Uses the local Claude CLI when available. |
+| `codex` | CLI agent | Uses the local Codex CLI when available. |
 
 ## Selection Order
 
@@ -24,6 +25,11 @@ Backend selection follows this order:
 4. Auto-detect from available non-shell providers
 
 Shell is never auto-detected.
+
+Auto-detect is intentionally non-blocking: it checks environment variables and
+local executables, but does not open the macOS Keychain. If a provider key only
+lives in the vault, select that backend explicitly with `backend`, step
+`backend`, or `--backend`.
 
 ## OpenAI Responses
 
@@ -82,3 +88,13 @@ own key.
 Provider `base_url` is a trust boundary. Built-in OpenAI and DeepSeek key names
 are pinned to their official hosts. For third-party hosts, define a
 provider-specific env or vault key.
+
+## Agent CLI Notes
+
+The `claude` and `codex` adapters parse each CLI's structured JSON stream and
+store cleaned step output in run records. Provider diagnostics are filtered from
+the user-facing stream, while actionable errors such as missing auth, quota, or
+unsupported model messages are preserved.
+
+Agent CLI environments are allow-listed by backend, so an OpenAI key is not
+passed to Claude and an Anthropic key is not passed to Codex.
