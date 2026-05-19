@@ -32,6 +32,10 @@ this public repo.
 - [Security Model](security-model.md)
 - [Release Process](release-process.md)
 
+## Build Plans
+
+- [Runtime Intelligence Build](BUILD-Mentu-Recipes-Intelligence-v1.md)
+
 ## Examples
 
 - [Examples](examples.md)

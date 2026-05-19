@@ -47,6 +47,7 @@ Start with:
 - [Recipe Schema](docs/recipe-schema.md)
 - [Providers](docs/providers.md)
 - [Security Model](docs/security-model.md)
+- [Runtime Intelligence Build](docs/BUILD-Mentu-Recipes-Intelligence-v1.md)
 
 Recipe files are discovered in this order:
 
