@@ -18,10 +18,18 @@ enum CLI {
                 try check(args)
             case "run":
                 try await run(args)
+            case "resume":
+                try await resume(args)
+            case "retry-step":
+                try await retryStep(args)
             case "report":
                 try report(args)
+            case "doctor":
+                try doctor(args)
+            case "analyze-runs":
+                try analyzeRuns(args)
             case "adapters":
-                adapters()
+                try adapters(args)
             case "vault":
                 try vault(args)
             case "scan":
@@ -78,6 +86,42 @@ enum CLI {
         if !ok { throw RecipeError.failed("Recipe failed") }
     }
 
+    static func resume(_ args: [String]) async throws {
+        guard let runId = args.first else { throw RecipeError.failed("Usage: mentu-recipes resume <run-id> [--workspace PATH]") }
+        let parsed = parseOptions(Array(args.dropFirst()))
+        let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
+        let runner = RecipeRunner(options: RunOptions(
+            workspace: workspace,
+            backend: parsed["backend"],
+            model: parsed["model"],
+            cloudEnabled: parsed["cloud"] == "true",
+            quiet: parsed["quiet"] == "true",
+            maxParallel: parsed["max-parallel"].flatMap(Int.init)
+        ))
+        let record = try await runner.resume(runId: runId)
+        print("\n\(record.outcome == "ok" ? "✓" : "✗") \(record.recipeName) · \(record.outcome)")
+        if record.outcome != "ok" { throw RecipeError.failed("Recipe failed") }
+    }
+
+    static func retryStep(_ args: [String]) async throws {
+        guard args.count >= 2 else { throw RecipeError.failed("Usage: mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]") }
+        let runId = args[0]
+        let step = args[1]
+        let parsed = parseOptions(Array(args.dropFirst(2)))
+        let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
+        let runner = RecipeRunner(options: RunOptions(
+            workspace: workspace,
+            backend: parsed["backend"],
+            model: parsed["model"],
+            cloudEnabled: parsed["cloud"] == "true",
+            quiet: parsed["quiet"] == "true",
+            maxParallel: parsed["max-parallel"].flatMap(Int.init)
+        ))
+        let record = try await runner.resume(runId: runId, retryStep: step)
+        print("\n\(record.outcome == "ok" ? "✓" : "✗") \(record.recipeName) · \(record.outcome)")
+        if record.outcome != "ok" { throw RecipeError.failed("Recipe failed") }
+    }
+
     static func report(_ args: [String]) throws {
         guard let runId = args.first else { throw RecipeError.failed("Usage: mentu-recipes report <run-id> [--format markdown|json|csv] [--workspace PATH]") }
         let parsed = parseOptions(Array(args.dropFirst()))
@@ -87,13 +131,69 @@ enum CLI {
         print(try RunReporter.render(record, format: format))
     }
 
-    static func adapters() {
+    static func doctor(_ args: [String]) throws {
+        guard let name = args.first else { throw RecipeError.failed("Usage: mentu-recipes doctor <recipe-or-path> [--format markdown|json|csv] [--strict] [--workspace PATH]") }
+        let parsed = parseOptions(Array(args.dropFirst()))
+        let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
+        let format = ReportFormat(rawValue: parsed["format"] ?? "markdown") ?? .markdown
+        let report = RecipeDoctor.inspect(name, store: RecipeStore(paths: RecipePaths(workspace: workspace)))
+        print(try RecipeDoctor.render(report, format: format))
+        let strict = parsed["strict"] == "true"
+        let hasError = report.findings.contains { $0.severity == "error" }
+        let hasWarning = report.findings.contains { $0.severity == "warning" }
+        if hasError || (strict && hasWarning) {
+            throw RecipeError.failed("doctor found \(report.findings.count) finding(s)")
+        }
+    }
+
+    static func analyzeRuns(_ args: [String]) throws {
+        let parsed = parseOptions(args)
+        let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
+        let format = ReportFormat(rawValue: parsed["format"] ?? "markdown") ?? .markdown
+        let summary = RunAnalyzer.analyze(workspace: workspace, redacted: true)
+        if let export = parsed["export-jsonl"] {
+            try RunAnalyzer.exportJSONL(summary, to: URL(fileURLWithPath: export))
+        }
+        print(try RunAnalyzer.render(summary, format: format))
+    }
+
+    static func adapters(_ args: [String]) throws {
         let env = ProcessInfo.processInfo.environment
+        if args.contains("--json") {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(AdapterRegistry.allAdapters().map(\.capabilities))
+            print(String(data: data, encoding: .utf8) ?? "[]")
+            return
+        }
+        if let index = args.firstIndex(of: "--explain"), args.count > index + 1 {
+            let name = args[index + 1]
+            guard let adapter = AdapterRegistry.adapter(named: name) else {
+                throw RecipeError.backendUnavailable(name)
+            }
+            print(try explain(adapter))
+            return
+        }
         for adapter in AdapterRegistry.allAdapters() {
             let available = adapter.isAvailable(env: env) ? "available" : "unavailable"
             let auto = adapter.isAutoDetectable ? "auto" : "explicit"
             print("\(adapter.name)\t\(adapter.executionKind)\t\(adapter.streamFormat.rawValue)\t\(adapter.systemContextHandling.rawValue)\t\(available)\t\(auto)")
         }
+    }
+
+    static func explain(_ adapter: BackendAdapter) throws -> String {
+        let caps = adapter.capabilities
+        return """
+        \(caps.name)
+          execution: \(caps.executionKind)
+          stream: \(caps.streamFormat.rawValue)
+          completion: \(caps.completionPolicy)
+          local: \(caps.isLocal)
+          network: \(caps.requiresNetwork)
+          credential: \(caps.requiresCredential)
+          tools: \(caps.supportsTools)
+          structured completion: \(caps.supportsStructuredCompletion)
+        """
     }
 
     static func vault(_ args: [String]) throws {
@@ -153,7 +253,7 @@ enum CLI {
         while i < args.count {
             let arg = args[i]
             switch arg {
-            case "--workspace", "--backend", "--model", "--format", "--max-parallel":
+            case "--workspace", "--backend", "--model", "--format", "--max-parallel", "--export-jsonl":
                 if i + 1 < args.count {
                     result[String(arg.dropFirst(2))] = args[i + 1]
                     i += 2
@@ -171,6 +271,8 @@ enum CLI {
                 result["cloud"] = "true"
             case "--quiet":
                 result["quiet"] = "true"
+            case "--strict":
+                result["strict"] = "true"
             default:
                 break
             }
@@ -206,8 +308,12 @@ enum CLI {
           mentu-recipes init
           mentu-recipes check <recipe-or-path>
           mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
+          mentu-recipes resume <run-id> [--workspace PATH]
+          mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]
           mentu-recipes report <run-id> [--format markdown|json|csv]
-          mentu-recipes adapters
+          mentu-recipes doctor <recipe-or-path> [--format markdown|json|csv] [--strict]
+          mentu-recipes analyze-runs [--workspace PATH] [--format markdown|json|csv] [--export-jsonl PATH]
+          mentu-recipes adapters [--json|--explain NAME]
           mentu-recipes vault <set|get|list|delete> ...
           mentu-recipes scan [path] [--artifact PATH]
         """)

@@ -97,6 +97,9 @@ final class MentuRecipesCoreTests: XCTestCase {
         XCTAssertEqual(result.outcome, "ok")
         XCTAssertEqual(result.steps.first?.localComplete, true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".mentu/runs/\(result.runId)/run.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".mentu/runs/\(result.runId)/events.jsonl").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".mentu/runs/\(result.runId)/state.json").path))
+        XCTAssertFalse(RunReporter.loadEvents(runId: result.runId, workspace: root).isEmpty)
     }
 
     func testStepDirCannotEscapeWorkspace() async throws {
@@ -131,8 +134,10 @@ final class MentuRecipesCoreTests: XCTestCase {
     func testAdapterRegistryMetadata() {
         XCTAssertEqual(AdapterRegistry.adapter(named: "shell")?.completionPolicy, .shellExitCode)
         XCTAssertEqual(AdapterRegistry.adapter(named: "shell")?.systemContextHandling, .ignored)
+        XCTAssertEqual(AdapterRegistry.adapter(named: "shell")?.capabilities.canRunOffline, true)
         XCTAssertEqual(AdapterRegistry.adapter(named: "openai")?.executionKind, "llm-http")
         XCTAssertEqual(AdapterRegistry.adapter(named: "openai")?.streamFormat, .openAISSE)
+        XCTAssertEqual(AdapterRegistry.adapter(named: "openai")?.capabilities.requiresCredential, true)
         XCTAssertEqual(AdapterRegistry.adapter(named: "deepseek")?.executionKind, "llm-http")
         XCTAssertEqual(AdapterRegistry.adapter(named: "claude")?.executionKind, "agent-cli")
         XCTAssertEqual(AdapterRegistry.adapter(named: "claude")?.streamFormat, .claudeJSON)
@@ -361,6 +366,127 @@ final class MentuRecipesCoreTests: XCTestCase {
         XCTAssertEqual(result.outcome, "ok")
         XCTAssertLessThan(Date().timeIntervalSince(start), 2.5)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("c.txt").path))
+    }
+
+    func testEventLogToleratesMalformedTrailingLine() async throws {
+        let root = try tempDir()
+        let runDir = root.appendingPathComponent(".mentu/runs/run_test")
+        let writer = RunEventWriter(runId: "run_test", recipeName: "demo", runDir: runDir)
+        await writer.emit(.runStarted, status: "running")
+        let url = runDir.appendingPathComponent("events.jsonl")
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{not-json".utf8))
+        try handle.close()
+        XCTAssertEqual(RunEventWriter.load(from: url).count, 1)
+    }
+
+    func testBookkeepingVerificationWarningUnblocksDownstream() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "warn-contract",
+          "steps": [
+            {
+              "label": "write",
+              "backend": "shell",
+              "prompt": "echo OK > actual.txt && echo WRITE_COMPLETE",
+              "completion_keyword": "WRITE_COMPLETE",
+              "verify": {
+                "grep_present": [
+                  {"file":"missing-bookkeeping.txt","pattern":"STALE"}
+                ]
+              }
+            },
+            {
+              "label": "after",
+              "backend": "shell",
+              "depends_on": ["write"],
+              "prompt": "echo AFTER_COMPLETE > after.txt && echo AFTER_COMPLETE",
+              "completion_keyword": "AFTER_COMPLETE"
+            }
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/warn-contract.json"), atomically: true, encoding: .utf8)
+
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("warn-contract")
+        XCTAssertEqual(result.outcome, "ok")
+        XCTAssertEqual(result.steps.first?.outcome, StepExecutionState.warnBookkeeping.rawValue)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("after.txt").path))
+    }
+
+    func testGitCleanOutsideIgnoresPreexistingDirtyFiles() async throws {
+        let root = try tempDir()
+        _ = try await git(["init"], cwd: root)
+        _ = try await git(["config", "user.name", "Mentu Recipes Test"], cwd: root)
+        _ = try await git(["config", "user.email", "recipes-test@mentu.ai"], cwd: root)
+        try "seed\n".write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        _ = try await git(["add", "README.md"], cwd: root)
+        _ = try await git(["commit", "-m", "seed"], cwd: root)
+        try "preexisting\n".write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "baseline-clean",
+          "steps": [
+            {
+              "label": "write",
+              "backend": "shell",
+              "prompt": "echo OK > allowed.txt && echo BASELINE_COMPLETE",
+              "completion_keyword": "BASELINE_COMPLETE",
+              "expected_changes": ["allowed.txt"],
+              "verify": {"git_clean_outside": ["allowed.txt"]}
+            }
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/baseline-clean.json"), atomically: true, encoding: .utf8)
+
+        let result = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("baseline-clean")
+        XCTAssertEqual(result.outcome, "ok")
+        XCTAssertEqual(result.steps.first?.git?.preexistingPaths?.contains("README.md"), true)
+    }
+
+    func testResumeRerunsOnlyIncompleteSteps() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {
+          "name": "resume-demo",
+          "steps": [
+            {"label":"first","backend":"shell","prompt":"echo first >> first.txt && echo FIRST_COMPLETE","completion_keyword":"FIRST_COMPLETE"},
+            {"label":"second","backend":"shell","prompt":"test -f marker && echo SECOND_COMPLETE > second.txt && echo SECOND_COMPLETE","completion_keyword":"SECOND_COMPLETE"}
+          ]
+        }
+        """.write(to: root.appendingPathComponent(".mentu/recipes/resume-demo.json"), atomically: true, encoding: .utf8)
+
+        let runner = RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true))
+        let failed = try await runner.run("resume-demo")
+        XCTAssertEqual(failed.outcome, "failed")
+        try "go\n".write(to: root.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        let resumed = try await runner.resume(runId: failed.runId)
+        XCTAssertEqual(resumed.outcome, "ok")
+        let first = try String(contentsOf: root.appendingPathComponent("first.txt"), encoding: .utf8)
+        XCTAssertEqual(first.split(separator: "\n").count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("second.txt").path))
+    }
+
+    func testDoctorAndAnalyzerProduceLocalIntelligence() async throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        try """
+        {"name":"doctor-demo","backend":"ollama","steps":[{"label":"ask","prompt":"Write a file called output.txt"}]}
+        """.write(to: root.appendingPathComponent(".mentu/recipes/doctor-demo.json"), atomically: true, encoding: .utf8)
+        let report = RecipeDoctor.inspect("doctor-demo", store: RecipeStore(paths: RecipePaths(workspace: root, home: root)))
+        XCTAssertTrue(report.findings.contains { $0.code == "missing_completion_signal" })
+
+        try """
+        {"name":"analysis-demo","steps":[{"label":"one","backend":"shell","prompt":"echo ANALYSIS_COMPLETE","completion_keyword":"ANALYSIS_COMPLETE"}]}
+        """.write(to: root.appendingPathComponent(".mentu/recipes/analysis-demo.json"), atomically: true, encoding: .utf8)
+        _ = try await RecipeRunner(options: RunOptions(workspace: root, home: root, cloudEnabled: false, quiet: true)).run("analysis-demo")
+        let summary = RunAnalyzer.analyze(workspace: root)
+        XCTAssertEqual(summary.runs, 1)
+        XCTAssertEqual(summary.workspace, "redacted")
     }
 
     func testRunReporterRendersMarkdownAndCSV() async throws {

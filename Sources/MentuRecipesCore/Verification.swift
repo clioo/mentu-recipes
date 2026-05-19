@@ -1,38 +1,103 @@
 import Foundation
 import Darwin
 
+public struct VerificationIssue: Codable, Sendable {
+    public let kind: String
+    public let file: String?
+    public let message: String
+
+    public init(kind: String, file: String? = nil, message: String) {
+        self.kind = kind
+        self.file = file
+        self.message = message
+    }
+}
+
+public struct VerificationOutcome: Codable, Sendable {
+    public let warnings: [VerificationIssue]
+    public let errors: [VerificationIssue]
+
+    public var passed: Bool { errors.isEmpty }
+    public var hasWarnings: Bool { !warnings.isEmpty }
+}
+
 public enum Verification {
     public static func verify(_ requirements: VerifyRequirements?, stepDir: URL) async throws {
-        guard let requirements else { return }
+        let outcome = try await evaluate(requirements, stepDir: stepDir, preStepBaseline: nil)
+        if let first = outcome.errors.first {
+            throw RecipeError.failed(first.message)
+        }
+    }
+
+    public static func evaluate(
+        _ requirements: VerifyRequirements?,
+        stepDir: URL,
+        preStepBaseline: WorkspaceBaseline?
+    ) async throws -> VerificationOutcome {
+        var warnings: [VerificationIssue] = []
+        var errors: [VerificationIssue] = []
+        guard let requirements else {
+            return VerificationOutcome(warnings: [], errors: [])
+        }
 
         for check in requirements.grepPresent ?? [] {
-            let content = try read(check.file, from: stepDir)
+            guard let content = try? read(check.file, from: stepDir) else {
+                warnings.append(.init(
+                    kind: "grep_present",
+                    file: check.file,
+                    message: check.description ?? "Bookkeeping warning: verification file missing for grep_present: \(check.file)"
+                ))
+                continue
+            }
             let count = content.components(separatedBy: check.pattern).count - 1
             let min = check.min ?? 1
             if count < min {
-                throw RecipeError.failed(check.description ?? "\(check.file) must contain '\(check.pattern)' at least \(min) time(s)")
+                warnings.append(.init(
+                    kind: "grep_present",
+                    file: check.file,
+                    message: check.description ?? "Bookkeeping warning: \(check.file) contains '\(check.pattern)' \(count) time(s), expected at least \(min)"
+                ))
             }
             if let max = check.max, count > max {
-                throw RecipeError.failed(check.description ?? "\(check.file) must contain '\(check.pattern)' at most \(max) time(s)")
+                warnings.append(.init(
+                    kind: "grep_present",
+                    file: check.file,
+                    message: check.description ?? "Bookkeeping warning: \(check.file) contains '\(check.pattern)' \(count) time(s), expected at most \(max)"
+                ))
             }
         }
 
         for check in requirements.grepAbsent ?? [] {
-            let content = try read(check.file, from: stepDir)
+            guard let content = try? read(check.file, from: stepDir) else {
+                warnings.append(.init(
+                    kind: "grep_absent",
+                    file: check.file,
+                    message: check.description ?? "Bookkeeping warning: verification file missing for grep_absent: \(check.file)"
+                ))
+                continue
+            }
             if content.contains(check.pattern) {
-                throw RecipeError.failed(check.description ?? "\(check.file) must not contain '\(check.pattern)'")
+                warnings.append(.init(
+                    kind: "grep_absent",
+                    file: check.file,
+                    message: check.description ?? "Bookkeeping warning: \(check.file) still contains '\(check.pattern)'"
+                ))
             }
         }
 
         for check in requirements.fileAbsent ?? [] {
             let path = try scopedURL(check.file, from: stepDir).path
             if FileManager.default.fileExists(atPath: path) {
-                throw RecipeError.failed(check.description ?? "\(check.file) must not exist")
+                errors.append(.init(
+                    kind: "file_absent",
+                    file: check.file,
+                    message: check.description ?? "\(check.file) must not exist"
+                ))
             }
         }
 
         if let allowed = requirements.gitCleanOutside {
-            try await verifyGitCleanOutside(allowed, stepDir: stepDir)
+            errors += await gitCleanOutsideIssues(allowed, stepDir: stepDir, preStepBaseline: preStepBaseline)
         }
 
         for command in requirements.commands ?? [] {
@@ -46,9 +111,14 @@ public enum Verification {
                 eventSink: { _ in }
             )
             if result.exitCode != 0 {
-                throw RecipeError.failed("Verification command failed: \(command)\n\(result.stderr)")
+                errors.append(.init(
+                    kind: "command",
+                    message: "Verification command failed: \(command)\n\(result.stderr)"
+                ))
             }
         }
+
+        return VerificationOutcome(warnings: warnings, errors: errors)
     }
 
     private static func read(_ relative: String, from stepDir: URL) throws -> String {
@@ -70,28 +140,22 @@ public enum Verification {
         return url
     }
 
-    private static func verifyGitCleanOutside(_ allowed: [String], stepDir: URL) async throws {
-        guard ProcessRunner.findExecutable("git") != nil else { return }
-        let result = try await ProcessRunner.run(
-            executable: ProcessRunner.findExecutable("git")!,
-            arguments: ["status", "--porcelain"],
-            env: ProcessInfo.processInfo.environment,
-            workingDirectory: stepDir,
-            timeout: 10,
-            maxOutputBytes: 1_000_000,
-            eventSink: { _ in }
-        )
-        guard result.exitCode == 0 else { return }
-        let dirty = result.stdout.split(separator: "\n").compactMap { line -> String? in
-            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard let last = parts.last else { return nil }
-            return String(last)
-        }
-        let offenders = dirty.filter { path in
-            !allowed.contains { pattern in fnmatch(pattern, path, 0) == 0 || path.hasPrefix(pattern) }
-        }
-        if !offenders.isEmpty {
-            throw RecipeError.failed("Dirty files outside allowed paths: \(offenders.joined(separator: ", "))")
-        }
+    private static func gitCleanOutsideIssues(
+        _ allowed: [String],
+        stepDir: URL,
+        preStepBaseline: WorkspaceBaseline?
+    ) async -> [VerificationIssue] {
+        guard ProcessRunner.findExecutable("git") != nil else { return [] }
+        let before = preStepBaseline ?? WorkspaceBaseline(capturedAt: "", gitRoot: nil, head: nil, dirtyPaths: [], untrackedPaths: [])
+        let after = await WorkspaceBaselineManager.capture(from: stepDir)
+        let drift = WorkspaceBaselineManager.classify(before: before, after: after, expectedChanges: allowed)
+        let offenders = drift.unexpectedPaths
+        guard !offenders.isEmpty else { return [] }
+        return [
+            .init(
+                kind: "git_clean_outside",
+                message: "Dirty files outside allowed paths: \(offenders.joined(separator: ", "))"
+            )
+        ]
     }
 }

@@ -3,15 +3,22 @@ import Darwin
 
 public struct StepGitRecord: Codable, Sendable {
     public let changedPaths: [String]
+    public let expectedPaths: [String]?
+    public let unexpectedPaths: [String]?
+    public let preexistingPaths: [String]?
     public let committedHash: String?
     public let quarantineFiles: [String]
     public let note: String?
+    public let fatal: Bool?
 
     enum CodingKeys: String, CodingKey {
         case changedPaths = "changed_paths"
+        case expectedPaths = "expected_paths"
+        case unexpectedPaths = "unexpected_paths"
+        case preexistingPaths = "preexisting_paths"
         case committedHash = "committed_hash"
         case quarantineFiles = "quarantine_files"
-        case note
+        case note, fatal
     }
 }
 enum GitWorkspace {
@@ -20,20 +27,23 @@ enum GitWorkspace {
         expectedChanges: [String]?,
         stepDir: URL,
         runDir: URL,
-        runId: String
+        runId: String,
+        preStepBaseline: WorkspaceBaseline?
     ) async -> StepGitRecord? {
         guard let expectedChanges else { return nil }
         guard let git = ProcessRunner.findExecutable("git") else {
-            return StepGitRecord(changedPaths: [], committedHash: nil, quarantineFiles: [], note: "git unavailable")
+            return StepGitRecord(changedPaths: [], expectedPaths: nil, unexpectedPaths: nil, preexistingPaths: nil, committedHash: nil, quarantineFiles: [], note: "git unavailable", fatal: nil)
         }
         guard let repoRoot = await repositoryRoot(git: git, from: stepDir) else {
-            return StepGitRecord(changedPaths: [], committedHash: nil, quarantineFiles: [], note: "not a git worktree")
+            return StepGitRecord(changedPaths: [], expectedPaths: nil, unexpectedPaths: nil, preexistingPaths: nil, committedHash: nil, quarantineFiles: [], note: "not a git worktree", fatal: nil)
         }
 
-        let dirty = await dirtyPaths(git: git, repoRoot: repoRoot)
-        let normalized = expectedChanges.compactMap { normalizeExpectedPath($0) }
-        let matched = dirty.filter { path in normalized.contains { matches(pattern: $0, path: path) } }
-        let unmatched = dirty.filter { !matched.contains($0) && !$0.hasPrefix(".mentu/runs/") }
+        let before = preStepBaseline ?? WorkspaceBaseline(capturedAt: "", gitRoot: repoRoot.path, head: nil, dirtyPaths: [], untrackedPaths: [])
+        let after = await WorkspaceBaselineManager.capture(from: stepDir)
+        let drift = WorkspaceBaselineManager.classify(before: before, after: after, expectedChanges: expectedChanges)
+        let dirty = after.dirtyPaths.filter { !WorkspaceBaselineManager.isRunnerOwned($0) }
+        let matched = drift.expectedPaths
+        let unmatched = drift.unexpectedPaths
         var quarantineFiles: [String] = []
         if !unmatched.isEmpty {
             if let file = try? quarantine(paths: unmatched, git: git, repoRoot: repoRoot, runDir: runDir, runId: runId, label: label) {
@@ -44,9 +54,13 @@ enum GitWorkspace {
         guard !matched.isEmpty else {
             return StepGitRecord(
                 changedPaths: dirty,
+                expectedPaths: matched,
+                unexpectedPaths: unmatched,
+                preexistingPaths: drift.preexistingPaths,
                 committedHash: nil,
                 quarantineFiles: quarantineFiles,
-                note: dirty.isEmpty ? "no changes" : "no changes matched expected_changes"
+                note: dirty.isEmpty ? "no changes" : "no changes matched expected_changes",
+                fatal: !unmatched.isEmpty
             )
         }
 
@@ -71,9 +85,13 @@ enum GitWorkspace {
         let hash = await headHash(git: git, repoRoot: repoRoot)
         return StepGitRecord(
             changedPaths: dirty,
+            expectedPaths: matched,
+            unexpectedPaths: unmatched,
+            preexistingPaths: drift.preexistingPaths,
             committedHash: commit?.exitCode == 0 ? hash : nil,
             quarantineFiles: quarantineFiles,
-            note: commit?.exitCode == 0 ? nil : "git commit did not create a commit"
+            note: commit?.exitCode == 0 ? nil : "git commit did not create a commit",
+            fatal: commit?.exitCode != 0
         )
     }
 

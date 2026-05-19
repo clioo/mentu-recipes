@@ -91,6 +91,12 @@ runner commits matching dirty paths and writes unrelated dirty changes into a
 quarantine patch under the run directory. Absolute, home-rooted, and traversal
 entries are ignored.
 
+The runner compares each step against a pre-step workspace baseline. Dirty files
+that existed before the step are recorded as pre-existing and are not blamed on
+the step. If a step both commits expected files and creates unrelated files, the
+unrelated files are quarantined and the step is recorded as
+`warn_bookkeeping`.
+
 ## Cloud Fields
 
 ```json

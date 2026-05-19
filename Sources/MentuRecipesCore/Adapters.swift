@@ -75,6 +75,46 @@ public struct AdapterResult: Sendable {
     public let outputTokens: Int?
 }
 
+public struct AdapterCapability: Codable, Sendable {
+    public let name: String
+    public let executionKind: String
+    public let streamFormat: StreamFormat
+    public let completionPolicy: String
+    public let systemContextHandling: SystemContextHandling
+    public let isLocal: Bool
+    public let requiresNetwork: Bool
+    public let requiresCredential: Bool
+    public let supportsTools: Bool
+    public let supportsToolAllowList: Bool
+    public let supportsToolDenyList: Bool
+    public let supportsReasoning: Bool
+    public let supportsThinking: Bool
+    public let supportsMaxOutputTokens: Bool
+    public let reportsTokenUsage: Bool
+    public let supportsStructuredCompletion: Bool
+    public let canRunOffline: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case executionKind = "execution_kind"
+        case streamFormat = "stream_format"
+        case completionPolicy = "completion_policy"
+        case systemContextHandling = "system_context_handling"
+        case isLocal = "is_local"
+        case requiresNetwork = "requires_network"
+        case requiresCredential = "requires_credential"
+        case supportsTools = "supports_tools"
+        case supportsToolAllowList = "supports_tool_allow_list"
+        case supportsToolDenyList = "supports_tool_deny_list"
+        case supportsReasoning = "supports_reasoning"
+        case supportsThinking = "supports_thinking"
+        case supportsMaxOutputTokens = "supports_max_output_tokens"
+        case reportsTokenUsage = "reports_token_usage"
+        case supportsStructuredCompletion = "supports_structured_completion"
+        case canRunOffline = "can_run_offline"
+    }
+}
+
 public protocol BackendAdapter: Sendable {
     var name: String { get }
     var executionKind: String { get }
@@ -82,8 +122,43 @@ public protocol BackendAdapter: Sendable {
     var completionPolicy: CompletionPolicy { get }
     var systemContextHandling: SystemContextHandling { get }
     var isAutoDetectable: Bool { get }
+    var capabilities: AdapterCapability { get }
     func isAvailable(env: [String: String]) -> Bool
     func execute(_ request: AdapterRequest, eventSink: @escaping (String) -> Void) async throws -> AdapterResult
+}
+
+public extension BackendAdapter {
+    var capabilities: AdapterCapability {
+        let isAgent = executionKind == "agent-cli"
+        let isShell = executionKind == "shell"
+        let isOllama = name == "ollama"
+        let isHTTP = executionKind == "llm-http"
+        return AdapterCapability(
+            name: name,
+            executionKind: executionKind,
+            streamFormat: streamFormat,
+            completionPolicy: {
+                switch completionPolicy {
+                case .providerCompleteEvent: return "provider_complete_event"
+                case .keywordRequired: return "keyword_required"
+                case .shellExitCode: return "shell_exit_code"
+                }
+            }(),
+            systemContextHandling: systemContextHandling,
+            isLocal: isShell || isAgent || isOllama,
+            requiresNetwork: isHTTP && !isOllama,
+            requiresCredential: isHTTP && !isOllama,
+            supportsTools: isAgent,
+            supportsToolAllowList: isAgent,
+            supportsToolDenyList: isAgent,
+            supportsReasoning: isAgent || name == "openai",
+            supportsThinking: name == "claude",
+            supportsMaxOutputTokens: isHTTP || name == "openai",
+            reportsTokenUsage: streamFormat != .plainText,
+            supportsStructuredCompletion: completionPolicy == .providerCompleteEvent,
+            canRunOffline: isShell || isOllama
+        )
+    }
 }
 
 public enum AdapterRegistry {
@@ -136,6 +211,10 @@ public enum AdapterRegistry {
             ClaudeCLIAdapter(),
             CodexCLIAdapter()
         ]
+    }
+
+    public static func capabilities(providers: [String: ProviderConfig] = [:]) -> [AdapterCapability] {
+        allAdapters().map(\.capabilities)
     }
 
     private static func adapterFromProviderConfig(name: String, config: ProviderConfig) -> BackendAdapter {

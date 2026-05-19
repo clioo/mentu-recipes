@@ -12,7 +12,7 @@ grounded_in:
   - Adapter corpus audit: backend metadata, parser behavior, and provider routing traces
   - Workspace history audit: file-history, quarantine, hook, and run-state patterns
   - Existing release hardening: scanner, provider log sanitizer, credential boundaries
-status: "PLANNED - runtime intelligence layer for a provider-neutral recipe runner"
+status: "IMPLEMENTED - runtime intelligence layer for a provider-neutral recipe runner"
 ---
 
 # BUILD: Mentu Recipes Intelligence v1

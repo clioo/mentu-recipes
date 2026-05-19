@@ -13,6 +13,11 @@ The public runner focuses on:
 - retries and timeouts
 - macOS Keychain backed vault keys
 - local run records
+- append-only run events
+- resumable state
+- workspace baseline and drift attribution
+- deterministic recipe quality checks
+- redacted local run analysis
 - deterministic verification
 - optional Mentu API hooks
 
@@ -37,7 +42,8 @@ A recipe is a small workflow:
 3. Resolve credentials from env or vault.
 4. Run each step with its selected backend.
 5. Check local completion and optional verification.
-6. Write a run record under `.mentu/runs`.
-7. Optionally send run events to `api.mentu.ai`.
+6. Write run evidence under `.mentu/runs`.
+7. Optionally resume or analyze local run records.
+8. Optionally send run events to `api.mentu.ai`.
 
 The engine does not try to hide what it is doing. The files are the interface.

@@ -98,3 +98,26 @@ unsupported model messages are preserved.
 
 Agent CLI environments are allow-listed by backend, so an OpenAI key is not
 passed to Claude and an Anthropic key is not passed to Codex.
+
+## Adapter Capabilities
+
+Every backend reports machine-readable capabilities:
+
+- execution kind
+- stream format
+- completion policy
+- local/cloud boundary
+- network and credential requirements
+- tool allow-list and deny-list support
+- reasoning, thinking, and token-limit support
+- structured completion and token reporting
+
+Inspect them with:
+
+```sh
+mentu-recipes adapters --json
+mentu-recipes adapters --explain codex
+```
+
+Recipe intelligence uses these capabilities instead of provider-specific
+assumptions.

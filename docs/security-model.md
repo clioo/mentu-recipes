@@ -23,6 +23,11 @@ rule is simple: treat recipes like code.
 - Agent CLI environments are allow-listed by backend.
 - `expected_changes` can auto-commit intended files and quarantine unrelated
   dirty files into the run directory for review.
+- Workspace drift checks subtract pre-existing dirty files before deciding what
+  the current step changed.
+- `doctor` and `analyze-runs` are deterministic local commands. `analyze-runs`
+  does not read prompt or full output contents and defaults to redacted
+  aggregate metadata.
 - Release scans can include built artifacts as well as source paths.
 
 ## Recommended Practice
@@ -33,4 +38,7 @@ rule is simple: treat recipes like code.
 - Prefer provider-specific env names for custom providers.
 - Use deterministic verification for important file checks.
 - Use `expected_changes` on writing steps so unrelated edits are quarantined.
+- Use `mentu-recipes doctor` before committing new recipes.
+- Use `mentu-recipes analyze-runs` to improve recipes from local evidence
+  without sending run contents anywhere.
 - Run `mentu-recipes scan .` before publishing.

@@ -13,6 +13,11 @@ public enum RunReporter {
         return try JSONDecoder().decode(RecipeRunRecord.self, from: data)
     }
 
+    public static func loadEvents(runId: String, workspace: URL) -> [RunEvent] {
+        let path = workspace.appendingPathComponent(".mentu/runs/\(runId)/events.jsonl")
+        return RunEventWriter.load(from: path)
+    }
+
     public static func render(_ record: RecipeRunRecord, format: ReportFormat) throws -> String {
         switch format {
         case .json:
@@ -20,21 +25,23 @@ public enum RunReporter {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             return String(data: try encoder.encode(record), encoding: .utf8) ?? "{}"
         case .csv:
-            var lines = ["run_id,recipe,step,backend,model,exit_code,complete,duration_seconds,attempts,committed_hash,quarantine_count"]
+            var lines = ["run_id,recipe,step,backend,model,outcome,exit_code,complete,duration_seconds,attempts,committed_hash,quarantine_count"]
             for step in record.steps {
-                lines.append([
+                let row: [String] = [
                     record.runId,
                     record.recipeName,
                     step.label,
                     step.backend,
                     step.model ?? "",
+                    step.outcome ?? "",
                     String(step.exitCode),
                     String(step.localComplete),
                     String(step.durationSeconds),
                     String(step.attempts),
                     step.git?.committedHash ?? "",
                     String(step.git?.quarantineFiles.count ?? 0)
-                ].map(csvEscape).joined(separator: ","))
+                ]
+                lines.append(row.map(csvEscape).joined(separator: ","))
             }
             return lines.joined(separator: "\n") + "\n"
         case .markdown:
@@ -48,12 +55,19 @@ public enum RunReporter {
                 "- Ended: \(record.endedAt ?? "running")",
                 "- Cloud: `\(record.cloudMode)`",
                 "",
-                "| Step | Backend | Complete | Exit | Duration | Attempts | Commit | Quarantine |",
-                "| --- | --- | ---: | ---: | ---: | ---: | --- | ---: |"
+                "| Step | Backend | Outcome | Complete | Exit | Duration | Attempts | Commit | Quarantine |",
+                "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |"
             ]
             for step in record.steps {
                 let commit = step.git?.committedHash.map { String($0.prefix(12)) } ?? ""
-                lines.append("| \(step.label) | \(step.backend) | \(step.localComplete ? "yes" : "no") | \(step.exitCode) | \(step.durationSeconds)s | \(step.attempts) | \(commit) | \(step.git?.quarantineFiles.count ?? 0) |")
+                lines.append("| \(step.label) | \(step.backend) | \(step.outcome ?? "") | \(step.localComplete ? "yes" : "no") | \(step.exitCode) | \(step.durationSeconds)s | \(step.attempts) | \(commit) | \(step.git?.quarantineFiles.count ?? 0) |")
+            }
+            let warningRows = record.steps.flatMap { step in (step.warnings ?? []).map { (step.label, $0) } }
+            if !warningRows.isEmpty {
+                lines += ["", "## Warnings", ""]
+                for (label, warning) in warningRows {
+                    lines.append("- \(label): \(warning)")
+                }
             }
             if !record.hooks.isEmpty || record.steps.contains(where: { !($0.hooks ?? []).isEmpty }) {
                 lines += ["", "## Hooks", ""]

@@ -29,6 +29,7 @@ this public repo.
 - [CLI Reference](cli.md)
 - [Cloud Hooks](cloud-hooks.md)
 - [Run Records](run-records.md)
+- [Runtime Intelligence](runtime-intelligence.md)
 - [Security Model](security-model.md)
 - [Release Process](release-process.md)
 

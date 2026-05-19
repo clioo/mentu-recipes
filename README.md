@@ -46,6 +46,7 @@ Start with:
 - [Quick Start](docs/quick-start.md)
 - [Recipe Schema](docs/recipe-schema.md)
 - [Providers](docs/providers.md)
+- [Runtime Intelligence](docs/runtime-intelligence.md)
 - [Security Model](docs/security-model.md)
 - [Runtime Intelligence Build](docs/BUILD-Mentu-Recipes-Intelligence-v1.md)
 
@@ -95,13 +96,17 @@ review, and run them from CI or a local terminal.
 ```sh
 mentu-recipes init
 mentu-recipes check <recipe-or-path>
-          mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
-          mentu-recipes report <run-id> [--format markdown|json|csv]
-          mentu-recipes adapters
-          printf '%s' "$SECRET" | mentu-recipes vault set <key>
-          mentu-recipes vault get <key>
-          mentu-recipes vault list
-          mentu-recipes scan [path] [--artifact PATH]
+mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
+mentu-recipes resume <run-id>
+mentu-recipes retry-step <run-id> <step-label>
+mentu-recipes report <run-id> [--format markdown|json|csv]
+mentu-recipes doctor <recipe-or-path> [--strict]
+mentu-recipes analyze-runs [--format markdown|json|csv]
+mentu-recipes adapters [--json|--explain NAME]
+printf '%s' "$SECRET" | mentu-recipes vault set <key>
+mentu-recipes vault get <key>
+mentu-recipes vault list
+mentu-recipes scan [path] [--artifact PATH]
 ```
 
 ## Built-In Backends

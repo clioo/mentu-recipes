@@ -37,6 +37,25 @@ Options:
 | `--var KEY=VALUE` | Add a prompt and env variable. Can be repeated. |
 | `--quiet` | Reduce step streaming output. |
 
+## `resume`
+
+```sh
+mentu-recipes resume <run-id> [--workspace PATH]
+```
+
+Loads `.mentu/runs/<run-id>/state.json`, skips steps already marked
+`success` or `warn_bookkeeping`, and reruns incomplete branches. Resume appends
+new events to the existing `events.jsonl`.
+
+## `retry-step`
+
+```sh
+mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]
+```
+
+Marks one step as pending and resumes the run. Completed dependencies remain
+complete.
+
 ## `report`
 
 ```sh
@@ -49,13 +68,38 @@ machine-readable JSON, or CSV.
 ## `adapters`
 
 ```sh
-mentu-recipes adapters
+mentu-recipes adapters [--json|--explain NAME]
 ```
 
 Prints backend name, execution kind, stream format, system-context handling,
 availability, and auto-detect behavior. Availability checks are non-blocking and
 only inspect environment variables or local executables; vault-only credentials
 can still be used by explicitly selecting a backend.
+
+`--json` prints machine-readable adapter capabilities. `--explain NAME` prints
+why a backend behaves the way it does: local/cloud boundary, network and
+credential needs, tool support, and completion policy.
+
+## `doctor`
+
+```sh
+mentu-recipes doctor <recipe-or-path> [--format markdown|json|csv] [--strict]
+```
+
+Runs deterministic local recipe intelligence. It checks observable completion,
+expected-change coverage, backend compatibility, custom provider credential
+boundaries, dangerous shell patterns, and portability hints. Strict mode exits
+non-zero on warnings as well as errors.
+
+## `analyze-runs`
+
+```sh
+mentu-recipes analyze-runs [--workspace PATH] [--format markdown|json|csv] [--export-jsonl PATH]
+```
+
+Summarizes local run records without reading prompt or output contents. The
+default output is redacted and aggregates success rates, backend behavior,
+durations, quarantine frequency, and recommendations.
 
 ## `vault`
 
