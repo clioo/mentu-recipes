@@ -27,6 +27,18 @@ Install the signed macOS package:
 curl -fsSL https://get.mentu.ai | sh
 ```
 
+Or install the published package directly from GitHub:
+
+```sh
+VERSION=0.1.0
+PKG="mentu-recipes-${VERSION}-macos-arm64.pkg"
+BASE="https://github.com/mentu-ai/mentu-recipes/releases/download/v${VERSION}"
+curl -fL "$BASE/$PKG" -o "$PKG"
+echo "a6ab0e0125c90cb1d57361972dc9eeada229a7d9b4c8d3599388c1ada6cee560  $PKG" | shasum -a 256 -c -
+spctl -a -vv -t install "$PKG"
+sudo installer -pkg "$PKG" -target /
+```
+
 Or build from source:
 
 ```sh
