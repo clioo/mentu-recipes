@@ -123,6 +123,10 @@ jobs:
 
           A passing result means the binary you hold was produced by this repository's release workflow at this tag, and not rebuilt or substituted by anyone afterwards.
 
+          ## Coming next
+
+          The progress renderer has received a structural upgrade that is not part of this release. It ships in the next patch release.
+
           ## Install via Homebrew
 
           The binary is also published through the Mentu tap at [mentu-ai/homebrew-tap](https://github.com/mentu-ai/homebrew-tap):
