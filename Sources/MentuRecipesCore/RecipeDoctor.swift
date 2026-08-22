@@ -62,8 +62,8 @@ public enum RecipeDoctor {
                    step.verify == nil {
                     findings.append(finding(severity: "warning", code: "missing_completion_signal", location: location, message: "Non-shell step has no completion keyword or deterministic verification.", recommendation: "Add `completion_keyword` or `verify` so completion is observable."))
                 }
-                if likelyWrites(step), step.expectedChanges == nil {
-                    findings.append(finding(severity: "warning", code: "missing_expected_changes", location: location, message: "Step appears to write files but does not declare `expected_changes`.", recommendation: "Declare expected paths or add `verify.git_clean_outside`."))
+                if likelyWrites(step), step.expectedChanges == nil, step.verify?.gitCleanOutside == nil {
+                    findings.append(finding(severity: "warning", code: "missing_expected_changes", location: location, message: "Step appears to write files but does not declare a write boundary.", recommendation: "Declare expected paths or add `verify.git_clean_outside`."))
                 }
                 if adapter?.executionKind == "shell", let prompt = step.prompt, looksDestructive(prompt) {
                     findings.append(finding(severity: "error", code: "destructive_shell", location: location, message: "Shell command contains a destructive pattern.", recommendation: "Review the command and scope it to the workspace before running."))

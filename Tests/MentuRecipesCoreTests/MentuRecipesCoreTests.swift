@@ -489,6 +489,25 @@ final class MentuRecipesCoreTests: XCTestCase {
         XCTAssertEqual(summary.workspace, "redacted")
     }
 
+    func testGitCleanOutsideSatisfiesWriteBoundaryCheck() throws {
+        let root = try tempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
+        let store = RecipeStore(paths: RecipePaths(workspace: root, home: root))
+
+        try """
+        {"name":"unbounded","steps":[{"label":"write","backend":"shell","prompt":"printf x > out/a.txt","completion_keyword":"OK"}]}
+        """.write(to: root.appendingPathComponent(".mentu/recipes/unbounded.json"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(RecipeDoctor.inspect("unbounded", store: store).findings.contains { $0.code == "missing_expected_changes" })
+
+        // `verify.git_clean_outside` bounds the writes without committing, which is the
+        // only boundary concurrent steps can safely declare. The doctor recommends it, so
+        // it has to count as a declared boundary.
+        try """
+        {"name":"bounded","steps":[{"label":"write","backend":"shell","prompt":"printf x > out/a.txt","completion_keyword":"OK","verify":{"git_clean_outside":["out"]}}]}
+        """.write(to: root.appendingPathComponent(".mentu/recipes/bounded.json"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(RecipeDoctor.inspect("bounded", store: store).findings.contains { $0.code == "missing_expected_changes" })
+    }
+
     func testRunReporterRendersMarkdownAndCSV() async throws {
         let root = try tempDir()
         try FileManager.default.createDirectory(at: root.appendingPathComponent(".mentu/recipes"), withIntermediateDirectories: true)
