@@ -39,4 +39,11 @@ this public repo.
 
 ## Examples
 
-- [Examples](examples.md)
+- [Runnable examples](../examples/README.md): three demo recipes with real
+  transcripts, including the refusals you hit when contract fields are missing.
+- [Recipe snippets](examples.md)
+
+## Scope
+
+The main [README](../README.md#scope) states exactly what this runner implements
+and what belongs to the full Mentu engine, which is not distributed here.

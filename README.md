@@ -1,25 +1,38 @@
 # Mentu Recipes
 
-Mentu Recipes is a source-available runner for file-based agent workflows.
-Define recipes in `.mentu/recipes`, keep reusable prompts in `.mentu/prompts`,
-and run them locally against OpenAI, Claude, OpenAI-compatible providers,
-local model servers, or shell steps.
+[![CI](https://github.com/mentu-ai/mentu-recipes/actions/workflows/ci.yml/badge.svg)](https://github.com/mentu-ai/mentu-recipes/actions/workflows/ci.yml)
+[![License: Source Available](https://img.shields.io/badge/license-source--available-blue.svg)](LICENSE)
+[![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)](#requirements)
+[![Swift 6.0](https://img.shields.io/badge/swift-6.0-orange.svg)](Package.swift)
 
-The local runner is an execution kernel: it handles recipe discovery, prompt
-rendering, provider-neutral execution, retries, timeouts, vault/env resolution,
-run logs, deterministic verification, hooks, DAG/parallel execution, and
-expected-change commit quarantine.
+### [Documentation](docs/README.md) | [Examples](examples/README.md) | [Recipe schema](docs/recipe-schema.md) | [CLI reference](docs/cli.md)
 
-Mentu Intelligence lives behind `api.mentu.ai`. When configured, it can add
-cloud verdicts, trust scoring, completion checks, correction learning, feature
-gates, and future premium recipe intelligence. Local execution still works
-without a Mentu API key.
+Mentu Recipes runs multi-step agent workflows defined as plain JSON files, where
+each step declares up front where it may write and what must be true when it
+finishes. The runner holds it to that: writes outside the declared boundary are
+quarantined instead of committed, declared artifacts are committed when the step
+closes, deterministic checks are recorded against the claim, and every run leaves
+a reviewable record on disk.
 
-This repository contains the public runner layer only. It does not contain
-Mentu private platform internals, proprietary evaluation logic, private model
-runtime code, confidential release systems, or internal automation assets.
+Steps run against OpenAI, the Claude and Codex CLIs, DeepSeek,
+OpenAI-compatible endpoints, local model servers, or a local shell. Recipes are
+files, so they diff, review and version like the rest of your code.
 
-## Quick Start
+## Get Started, choose your path
+
+| I want to | Start here |
+| --- | --- |
+| **Run a recipe** and see the contract enforced | [Run a recipe](#run-a-recipe) |
+| **Author a recipe** of my own | [Author a recipe](#author-a-recipe) |
+| Read **worked examples** with real transcripts | [Examples](#examples) |
+| Know **what this runner does and does not do** | [Scope](#scope) |
+
+## Requirements
+
+macOS 13 or later and a Swift 6.0 toolchain to build from source. The `shell`
+backend needs nothing else; provider backends need their own credentials.
+
+## Run a recipe
 
 Install the signed macOS package with Homebrew:
 
@@ -27,180 +40,228 @@ Install the signed macOS package with Homebrew:
 brew install --cask mentu-ai/tap/mentu-recipes
 ```
 
-Or install the published package directly from GitHub:
-
-```sh
-VERSION=0.1.0
-PKG="mentu-recipes-${VERSION}-macos-arm64.pkg"
-BASE="https://github.com/mentu-ai/mentu-recipes/releases/download/v${VERSION}"
-curl -fL "$BASE/$PKG" -o "$PKG"
-echo "a6ab0e0125c90cb1d57361972dc9eeada229a7d9b4c8d3599388c1ada6cee560  $PKG" | shasum -a 256 -c -
-spctl -a -vv -t install "$PKG"
-sudo installer -pkg "$PKG" -target /
-```
-
 Or build from source:
 
 ```sh
+git clone https://github.com/mentu-ai/mentu-recipes.git
+cd mentu-recipes
 swift build
 swift run mentu-recipes check shell-smoke
 swift run mentu-recipes run shell-smoke
 ```
 
-## Documentation
+The bundled demos need no API key. Run one in a scratch workspace:
 
-The public documentation is in [docs/README.md](docs/README.md).
+```sh
+examples/run-demo.sh hello-justifiable
+```
 
-Start with:
+```
+▶ produce · shell
+PRODUCE_COMPLETE
+▶ prove · shell
+PROVE_COMPLETE
 
-- [Overview](docs/overview.md)
-- [Install](docs/install.md)
-- [Quick Start](docs/quick-start.md)
-- [Recipe Schema](docs/recipe-schema.md)
-- [Providers](docs/providers.md)
-- [Runtime Intelligence](docs/runtime-intelligence.md)
-- [Security Model](docs/security-model.md)
-- [Runtime Intelligence Build](docs/BUILD-Mentu-Recipes-Intelligence-v1.md)
+✓ hello-justifiable · 2 step(s) · ok
+Run record: .../.mentu/runs/run_20260822024934_1F3BF42F/run.json
 
-Recipe files are discovered in this order:
+commits the runner made for declared artifacts:
+8ea5fc2 chore: mentu-recipes step produce (run_20260822024934_1F3BF42F)
+```
 
-1. `<workspace>/.mentu/recipes`
-2. `~/.mentu/recipes`
-3. direct file path, only when the file is still inside one of those roots
+`produce` declared `examples/.work/hello.md` and wrote exactly that, so the
+runner committed it. `prove` asserted the file says what `produce` claimed. Had
+`produce` written anything it did not declare, that change would have been
+written to a quarantine patch and left out of the commit.
 
-Prompt files are discovered in:
+Inspect what happened:
 
-1. `<workspace>/.mentu/prompts`
-2. `~/.mentu/prompts`
+```sh
+mentu-recipes report <run-id> --format markdown
+mentu-recipes analyze-runs
+```
 
-Prompt paths are always resolved inside those prompt roots. Absolute paths,
-`~`, path traversal, and symlink escapes are rejected.
+## Author a recipe
 
-## What A Recipe Does
+```sh
+mentu-recipes init          # creates .mentu/recipes and .mentu/prompts
+```
 
-A recipe is a JSON file with a name, optional defaults, and one or more steps.
-Each step chooses a backend, prompt source, timeout, retry behavior, and an
-optional deterministic completion keyword. Steps run locally and write run
-records under `.mentu/runs/<run-id>/`.
-
-Recipes are plain files. You can keep them in a project, review them in code
-review, and run them from CI or a local terminal.
-
-## Example Recipe
+A recipe is JSON. A step names a backend, a prompt or prompt file, and the
+claims it is willing to be held to:
 
 ```json
 {
-  "name": "shell-smoke",
-  "description": "One local shell step.",
+  "name": "tidy-changelog",
+  "type": "sequence",
   "steps": [
     {
-      "label": "say-hello",
+      "label": "edit",
+      "backend": "claude",
+      "prompt_file": "PROMPT-tidy.md",
+      "completion_keyword": "TIDY_COMPLETE",
+      "expected_changes": ["CHANGELOG.md"],
+      "timeout": 300
+    },
+    {
+      "label": "prove",
       "backend": "shell",
-      "prompt": "echo MENTU_RECIPES_COMPLETE",
-      "completion_keyword": "MENTU_RECIPES_COMPLETE"
+      "depends_on": ["edit"],
+      "prompt": "echo PROVE_COMPLETE",
+      "completion_keyword": "PROVE_COMPLETE",
+      "verify": {
+        "grep_absent": [
+          { "file": "CHANGELOG.md", "pattern": "TODO",
+            "description": "the changelog must not ship with TODO markers" }
+        ],
+        "commands": ["git diff --stat --exit-code || true"]
+      }
     }
   ]
 }
 ```
 
-## Commands
+Three fields carry the contract:
+
+- **`expected_changes`** bounds the writes. Matching files are committed when the
+  step closes; anything else is quarantined as a patch under the run directory.
+- **`verify`** is the proof. `grep_present` and `grep_absent` assert file
+  contents, `commands` runs shell assertions, `file_absent` asserts absence, and
+  `git_clean_outside` bounds writes without committing.
+- **`completion_keyword`** is the completion signal. The step is complete only if
+  the keyword appears in its output.
+
+Check the recipe before you run it:
 
 ```sh
-mentu-recipes init
-mentu-recipes check <recipe-or-path>
-mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
-mentu-recipes resume <run-id>
-mentu-recipes retry-step <run-id> <step-label>
-mentu-recipes report <run-id> [--format markdown|json|csv]
-mentu-recipes doctor <recipe-or-path> [--strict]
-mentu-recipes analyze-runs [--format markdown|json|csv]
-mentu-recipes adapters [--json|--explain NAME]
-printf '%s' "$SECRET" | mentu-recipes vault set <key>
-mentu-recipes vault get <key>
-mentu-recipes vault list
-mentu-recipes scan [path] [--artifact PATH]
+mentu-recipes check tidy-changelog
+mentu-recipes doctor tidy-changelog --strict
 ```
 
-## Built-In Backends
+`doctor` scores a recipe out of 100 and names what is missing: steps that write
+without declaring a boundary, non-shell steps with no observable completion
+signal, unknown backends, unsupported per-backend options, and shell commands
+that look destructive. `--strict` makes warnings fail, which is what you want in
+CI.
 
-- `shell`: runs an explicit local shell command and succeeds by exit code.
-- `openai`: uses the OpenAI Responses API for ChatGPT and GPT models.
-- `claude`: uses the local Claude CLI when installed.
-- `codex`: uses the local Codex CLI when installed.
-- `deepseek`: uses DeepSeek through an OpenAI-compatible chat API.
-- `openai-compatible`: can target providers with compatible chat APIs.
+Recipes resolve from `<workspace>/.mentu/recipes` then `~/.mentu/recipes`, by
+name. Prompts resolve from the matching `prompts` directories. Paths outside
+those roots, `~` expansion, traversal and symlink escapes are all rejected.
 
-Shell is explicit only. It is never selected automatically.
+Full field reference: [docs/recipe-schema.md](docs/recipe-schema.md).
+Verification semantics: [docs/verification.md](docs/verification.md).
 
-## Provider Credentials
+## Scope
 
-Credentials are resolved from explicit recipe env, process env, and the
-macOS Keychain service used by Mentu vault keys.
+This repository is the local runner, and it is worth being exact about where it
+ends so nothing here reads as a bigger claim than it is.
 
-Common key names:
+**It implements** the recipe and step model, DAG scheduling with derived layers,
+declared write boundaries with quarantine of undeclared changes, deterministic
+verification, per-backend completion policy, retries and timeouts, resume and
+per-step retry, run records under `.mentu/runs/`, local run analytics, and
+Keychain-backed credential resolution.
 
-- `OPENAI_API_KEY` or vault key `openai-api-key`
-- `ANTHROPIC_API_KEY` or vault key `anthropic-api-key`
-- `DEEPSEEK_API_KEY` or vault key `deepseek-api-key`
-- `MENTU_API_KEY` or vault key `mentu-api-key`
+**It does not implement** an append-only hash-chained ledger, trust scoring,
+hash-gated recipe commitment, or per-step worktree isolation. Those belong to the
+full Mentu engine, which is not distributed here. Run records in this runner are
+plain JSON written per run: they are not chained, and nothing in this runner
+verifies them after the fact. Where that boundary changes how you should author a
+recipe, the [examples](examples/README.md) say so at the point it matters.
 
-Custom provider `base_url` values are a trust boundary: a recipe can direct
-prompts and provider-specific API keys to that host. Built-in OpenAI and
-DeepSeek credential names are pinned to their official API hosts; use a
-provider-specific env or vault key for third-party providers.
+## Examples
 
-Shell steps are explicit only and run the command you put in the recipe. Treat
-recipes with shell steps like code. Step `dir` values are confined to the
-workspace; choose the workspace root intentionally with `--workspace`.
+Three recipes with real transcripts, including the exact refusals you hit when
+you leave the contract fields out:
 
-## Cloud Mode
+- **[hello-justifiable](examples/hello-justifiable/README.md)**: two steps, one
+  produces under a declared path and one proves the artifact. Shows the
+  `missing_expected_changes` warning, a quarantined stray write, and a drifting
+  claim caught by `grep_present`.
+- **[demo-compound](examples/demo-compound/README.md)**: two child recipes run
+  concurrently, a third joins them. Shows dependency validation refusals and why
+  a missing `depends_on` produces a result that changes between runs.
+- **[demo-parallel](examples/demo-parallel/README.md)**: a four-layer DAG closed
+  by a sentinel step. Shows why concurrent steps must not declare
+  `expected_changes` in a shared workspace, with the failing run record.
 
-Cloud mode is local-only by default. Enable run tracking explicitly with:
+All three use the `shell` backend and need no credentials.
+
+## Backends
+
+| Backend | Execution | Notes |
+| --- | --- | --- |
+| `shell` | local command | Succeeds by exit code. Never selected automatically. |
+| `openai` | OpenAI Responses API | `OPENAI_API_KEY` or vault key `openai-api-key`. |
+| `claude` | local Claude CLI | Requires the CLI on `PATH`. |
+| `codex` | local Codex CLI | Requires the CLI on `PATH`. |
+| `deepseek` | OpenAI-compatible chat | `DEEPSEEK_API_KEY` or vault key `deepseek-api-key`. |
+| `openai-compatible` | any compatible chat API | For local model servers and third-party hosts. |
 
 ```sh
-mentu-recipes run my-recipe --cloud
+mentu-recipes adapters                    # what is registered and available
+mentu-recipes adapters --explain claude   # capabilities of one backend
 ```
 
-A recipe can also opt in with `"cloud": { "enabled": true }`. Cloud failures do
-not stop local execution. Runs are marked local-only when Mentu Intelligence is
-unavailable. Step output is not sent for cloud evaluation unless a recipe
-explicitly sets `"cloud": { "evaluate_steps": true }`.
+Credentials come from recipe env, process env, or the macOS Keychain via
+`mentu-recipes vault`. Built-in OpenAI and DeepSeek credential names are pinned
+to their official hosts, so a custom `base_url` cannot quietly receive one.
 
-## Security Boundary
+## Security boundary
 
-Treat recipes as code. A recipe can call external model providers and, when a
-step uses the `shell` backend, execute local commands. Review third-party
-recipes before running them.
+Treat recipes as code. A recipe can call external providers and, with a `shell`
+step, run local commands. Review third-party recipes before running them.
 
-The runner rejects prompt paths outside configured prompt roots and rejects step
-working directories outside the selected workspace. Provider credentials are
-read from environment variables or vault keys and are not written to run logs by
-the runner. Built-in provider credentials are pinned to their official hosts so
-a custom `base_url` cannot silently receive an OpenAI or DeepSeek key.
-
-The public repository is intentionally limited to the local recipe runner. Mentu
-private intelligence remains in the cloud API and is not distributed in this
-source package.
-
-## Release Check
-
-Before publishing a source or binary artifact:
+Step working directories are confined to the selected workspace, prompt paths are
+confined to the prompt roots, and provider credentials are not written to run
+logs by the runner. Before publishing an artifact, run the release scanner:
 
 ```sh
 swift run mentu-recipes scan .
 ```
 
-The scanner fails on private paths, likely secrets, confidential markers, and
-protected Mentu platform terms that should not be present in the public repo.
+Details in [docs/security-model.md](docs/security-model.md). To report a
+vulnerability, see [SECURITY.md](SECURITY.md).
 
-For macOS package releases, the ship scripts also scan the stripped staging
-binary and expanded package payload before notarization. Raw SwiftPM release
-binaries can contain local build paths before stripping and should not be
-published directly.
+## Status
+
+Honest state of this repository, verified on 2026-08-21 on macOS 15 with Swift 6:
+
+- `swift build`: clean, no errors.
+- `swift test`: **30 tests, 0 failures**, in about 2 seconds. No hangs, no
+  crashes. The swift-testing half of the run is empty; every test here is XCTest.
+- All six bundled demo recipes score **100 with no findings** under
+  `mentu-recipes doctor`, and all three demos were executed end to end for the
+  transcripts in [examples/](examples/README.md).
+
+Known limitations, all documented rather than papered over:
+
+- **Concurrent steps must not declare `expected_changes` in a shared workspace.**
+  Steps in one layer share a git working tree and each commits when it closes, so
+  simultaneous committers race and the loser is marked failed despite succeeding.
+  Use `verify.git_clean_outside` on concurrent steps and let a serial step commit.
+  Worked through, with the failing run record, in
+  [examples/demo-parallel](examples/demo-parallel/README.md).
+- **`grep_present` and `grep_absent` are bookkeeping, not gates.** An unmet
+  assertion marks the step `warn_bookkeeping` and records the message, but the
+  run continues. Put assertions that must stop a run in `verify.commands`.
+- **A compound or parallel recipe must still carry a `steps` key**, even an empty
+  one, or it fails to load with a decoding error that does not name the field.
+- **Cloud mode is optional and off by default.** Local execution never depends on
+  it, and step output is only sent when a recipe sets
+  `"cloud": { "evaluate_steps": true }`.
+
+This repository is the local runner. Mentu's hosted intelligence lives behind
+`api.mentu.ai` and is not distributed here, and neither is the full Mentu engine.
+
+## Contributing
+
+Issues and pull requests are welcome. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) first. CI builds, tests, runs the release
+source scan and the release gate on every pull request; run
+`swift test && swift run mentu-recipes scan .` before you open one.
 
 ## License
 
-Mentu Recipes is source-available under the included license. You may read, run,
-copy, and modify it for personal, internal, educational, and evaluation use.
-Commercial redistribution, hosted-service use, and competing commercial workflow
-services require a separate written license from Mentu.
+Source-available under the Mentu Recipes Source Available License v1.0; see
+[LICENSE](LICENSE).
