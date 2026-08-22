@@ -34,11 +34,15 @@ backend needs nothing else; provider backends need their own credentials.
 
 ## Run a recipe
 
-Install the signed macOS package with Homebrew:
+Install the CI-built binary with Homebrew:
 
 ```sh
-brew install --cask mentu-ai/tap/mentu-recipes
+brew install mentu-ai/tap/mentu-recipes-bin
 ```
+
+Every release asset is built by GitHub Actions from the tagged source and
+carries a build provenance attestation you can check yourself; the commands
+and a real transcript are in [VERIFICATION.md](VERIFICATION.md).
 
 Or build from source:
 
