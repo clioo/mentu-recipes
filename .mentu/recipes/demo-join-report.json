@@ -1,0 +1,31 @@
+{
+  "name": "demo-join-report",
+  "description": "Child recipe: joins both halves and proves the join saw both of them.",
+  "type": "sequence",
+  "steps": [
+    {
+      "label": "join",
+      "backend": "shell",
+      "prompt": "cat examples/.work/inventory.txt examples/.work/metrics.txt > examples/.work/report.txt && echo JOIN_COMPLETE",
+      "completion_keyword": "JOIN_COMPLETE",
+      "expected_changes": ["examples/.work/report.txt"],
+      "verify": {
+        "grep_present": [
+          {
+            "file": "examples/.work/report.txt",
+            "pattern": "inventory:",
+            "min": 1,
+            "description": "the joined report must carry the inventory branch"
+          },
+          {
+            "file": "examples/.work/report.txt",
+            "pattern": "metrics:",
+            "min": 1,
+            "description": "the joined report must carry the metrics branch"
+          }
+        ]
+      },
+      "timeout": 30
+    }
+  ]
+}

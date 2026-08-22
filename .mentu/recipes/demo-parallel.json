@@ -1,0 +1,104 @@
+{
+  "name": "demo-parallel",
+  "description": "A four-layer DAG: three producers fan out, two aggregators join them, one merge collapses the pair, and a sentinel refuses to close unless every layer left evidence behind.",
+  "type": "sequence",
+  "max_parallel": 3,
+  "steps": [
+    {
+      "label": "alpha",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work/dag && printf 'alpha\\n' > examples/.work/dag/alpha.txt && echo ALPHA_COMPLETE",
+      "completion_keyword": "ALPHA_COMPLETE",
+      "verify": {
+        "git_clean_outside": ["examples/.work/dag"],
+        "grep_present": [
+          { "file": "examples/.work/dag/alpha.txt", "pattern": "alpha", "min": 1, "description": "alpha must leave its own artifact behind" }
+        ]
+      },
+      "timeout": 30
+    },
+    {
+      "label": "beta",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work/dag && printf 'beta\\n' > examples/.work/dag/beta.txt && echo BETA_COMPLETE",
+      "completion_keyword": "BETA_COMPLETE",
+      "verify": {
+        "git_clean_outside": ["examples/.work/dag"],
+        "grep_present": [
+          { "file": "examples/.work/dag/beta.txt", "pattern": "beta", "min": 1, "description": "beta must leave its own artifact behind" }
+        ]
+      },
+      "timeout": 30
+    },
+    {
+      "label": "gamma",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work/dag && printf 'gamma\\n' > examples/.work/dag/gamma.txt && echo GAMMA_COMPLETE",
+      "completion_keyword": "GAMMA_COMPLETE",
+      "verify": {
+        "git_clean_outside": ["examples/.work/dag"],
+        "grep_present": [
+          { "file": "examples/.work/dag/gamma.txt", "pattern": "gamma", "min": 1, "description": "gamma must leave its own artifact behind" }
+        ]
+      },
+      "timeout": 30
+    },
+    {
+      "label": "pair-ab",
+      "backend": "shell",
+      "depends_on": ["alpha", "beta"],
+      "prompt": "cat examples/.work/dag/alpha.txt examples/.work/dag/beta.txt > examples/.work/dag/pair-ab.txt && echo PAIR_AB_COMPLETE",
+      "completion_keyword": "PAIR_AB_COMPLETE",
+      "verify": {
+        "git_clean_outside": ["examples/.work/dag"],
+        "grep_present": [
+          { "file": "examples/.work/dag/pair-ab.txt", "pattern": "alpha", "min": 1, "description": "pair-ab must carry alpha" },
+          { "file": "examples/.work/dag/pair-ab.txt", "pattern": "beta", "min": 1, "description": "pair-ab must carry beta" }
+        ]
+      },
+      "timeout": 30
+    },
+    {
+      "label": "pair-bg",
+      "backend": "shell",
+      "depends_on": ["beta", "gamma"],
+      "prompt": "cat examples/.work/dag/beta.txt examples/.work/dag/gamma.txt > examples/.work/dag/pair-bg.txt && echo PAIR_BG_COMPLETE",
+      "completion_keyword": "PAIR_BG_COMPLETE",
+      "verify": {
+        "git_clean_outside": ["examples/.work/dag"],
+        "grep_present": [
+          { "file": "examples/.work/dag/pair-bg.txt", "pattern": "beta", "min": 1, "description": "pair-bg must carry beta" },
+          { "file": "examples/.work/dag/pair-bg.txt", "pattern": "gamma", "min": 1, "description": "pair-bg must carry gamma" }
+        ]
+      },
+      "timeout": 30
+    },
+    {
+      "label": "merge",
+      "backend": "shell",
+      "depends_on": ["pair-ab", "pair-bg"],
+      "prompt": "sort -u examples/.work/dag/pair-ab.txt examples/.work/dag/pair-bg.txt > examples/.work/dag/merge.txt && echo MERGE_COMPLETE",
+      "completion_keyword": "MERGE_COMPLETE",
+      "expected_changes": ["examples/.work/dag"],
+      "timeout": 30
+    },
+    {
+      "label": "sentinel",
+      "backend": "shell",
+      "depends_on": ["merge"],
+      "prompt": "echo SENTINEL_COMPLETE",
+      "completion_keyword": "SENTINEL_COMPLETE",
+      "verify": {
+        "grep_present": [
+          { "file": "examples/.work/dag/merge.txt", "pattern": "alpha", "min": 1, "description": "the merge must carry the alpha producer" },
+          { "file": "examples/.work/dag/merge.txt", "pattern": "beta", "min": 1, "description": "the merge must carry the beta producer" },
+          { "file": "examples/.work/dag/merge.txt", "pattern": "gamma", "min": 1, "description": "the merge must carry the gamma producer" }
+        ],
+        "commands": [
+          "test -f examples/.work/dag/pair-ab.txt && test -f examples/.work/dag/pair-bg.txt"
+        ]
+      },
+      "timeout": 30
+    }
+  ]
+}

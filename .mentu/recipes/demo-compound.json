@@ -1,0 +1,12 @@
+{
+  "name": "demo-compound",
+  "description": "Two child recipes run concurrently; a third joins them and cannot start until both have closed.",
+  "type": "compound",
+  "max_parallel": 2,
+  "steps": [],
+  "recipes": [
+    { "label": "inventory", "recipe": "demo-leaf-inventory" },
+    { "label": "metrics", "recipe": "demo-leaf-metrics" },
+    { "label": "report", "recipe": "demo-join-report", "depends_on": ["inventory", "metrics"] }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "demo-leaf-inventory",
+  "description": "Child recipe: writes the inventory half of the compound demo.",
+  "type": "sequence",
+  "steps": [
+    {
+      "label": "inventory",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work && printf 'inventory: 3 items\\n' > examples/.work/inventory.txt && echo INVENTORY_COMPLETE",
+      "completion_keyword": "INVENTORY_COMPLETE",
+      "expected_changes": ["examples/.work/inventory.txt"],
+      "timeout": 30
+    }
+  ]
+}

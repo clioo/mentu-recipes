@@ -1,0 +1,33 @@
+{
+  "name": "hello-justifiable",
+  "description": "Two steps: one produces an artifact under a declared path, one proves the artifact says what it claims.",
+  "type": "sequence",
+  "steps": [
+    {
+      "label": "produce",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work && printf 'status: ok\\nreviewed: yes\\n' > examples/.work/hello.md && echo PRODUCE_COMPLETE",
+      "completion_keyword": "PRODUCE_COMPLETE",
+      "expected_changes": ["examples/.work/hello.md"],
+      "timeout": 30
+    },
+    {
+      "label": "prove",
+      "backend": "shell",
+      "depends_on": ["produce"],
+      "prompt": "echo PROVE_COMPLETE",
+      "completion_keyword": "PROVE_COMPLETE",
+      "verify": {
+        "grep_present": [
+          {
+            "file": "examples/.work/hello.md",
+            "pattern": "status: ok",
+            "min": 1,
+            "description": "hello.md must record the status the produce step claimed to write"
+          }
+        ]
+      },
+      "timeout": 30
+    }
+  ]
+}

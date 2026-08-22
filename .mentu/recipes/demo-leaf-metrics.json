@@ -1,0 +1,15 @@
+{
+  "name": "demo-leaf-metrics",
+  "description": "Child recipe: writes the metrics half of the compound demo.",
+  "type": "sequence",
+  "steps": [
+    {
+      "label": "metrics",
+      "backend": "shell",
+      "prompt": "mkdir -p examples/.work && printf 'metrics: 42 ms\\n' > examples/.work/metrics.txt && echo METRICS_COMPLETE",
+      "completion_keyword": "METRICS_COMPLETE",
+      "expected_changes": ["examples/.work/metrics.txt"],
+      "timeout": 30
+    }
+  ]
+}
