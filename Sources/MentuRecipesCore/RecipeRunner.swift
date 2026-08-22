@@ -150,12 +150,14 @@ public final class RecipeRunner {
     private let paths: RecipePaths
     private let store: RecipeStore
     private let renderer: PromptRenderer
+    private let progress: RunProgress
 
     public init(options: RunOptions) {
         self.options = options
         self.paths = RecipePaths(workspace: options.workspace, home: options.home)
         self.store = RecipeStore(paths: paths)
         self.renderer = PromptRenderer(paths: paths)
+        self.progress = RunProgress(quiet: options.quiet)
     }
 
     public func run(_ nameOrPath: String) async throws -> RecipeRunRecord {
@@ -309,16 +311,29 @@ public final class RecipeRunner {
         retryStep: String?,
         vars: [String: String]
     ) async throws -> Bool {
+        let ordered = try store.topologicalOrder(recipe.steps)
+        let total = ordered.count
+        // The counter column names a step's place in the whole recipe, so it is
+        // the topological position even when steps run out of order in waves.
+        var position: [String: Int] = [:]
+        for (offset, step) in ordered.enumerated() { position[step.label] = offset + 1 }
+
         let hasDAG = recipe.steps.contains { !($0.dependsOn ?? []).isEmpty }
         if !hasDAG {
             var overallOK = true
-            for step in try store.topologicalOrder(recipe.steps) {
+            var done = 0
+            for step in ordered {
+                let index = position[step.label] ?? 0
                 if await state.shouldSkipCompleted(label: step.label, retryStep: retryStep) {
+                    progress.stepSkipped(index: index, total: total, label: step.label, reason: "already complete")
                     await events.emit(.stepSkipped, stepLabel: step.label, status: "success", message: "already complete")
+                    done += 1
                     continue
                 }
                 await events.emit(.stepQueued, stepLabel: step.label, status: "pending")
-                let stepRecord = await runStepSafely(step, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: record.cloudRunId, events: events, state: state, vars: vars)
+                progress.progressBar(done: done, total: total, noun: "steps")
+                let stepRecord = await runStepSafely(step, index: index, total: total, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: record.cloudRunId, events: events, state: state, vars: vars)
+                done += 1
                 record.steps.append(stepRecord)
                 try write(record, to: runDir.appendingPathComponent("run.json"))
                 if !stepRecord.unblocksDependents {
@@ -331,21 +346,27 @@ public final class RecipeRunner {
 
         var completed: [String: Bool] = [:]
         var overallOK = true
+        var done = 0
         for wave in try stepWaves(recipe.steps) {
             var runnableNow: [RecipeStep] = []
             for step in wave {
+                let index = position[step.label] ?? 0
                 if await state.shouldSkipCompleted(label: step.label, retryStep: retryStep) {
                     completed[step.label] = true
+                    progress.stepSkipped(index: index, total: total, label: step.label, reason: "already complete")
                     await events.emit(.stepSkipped, stepLabel: step.label, status: "success", message: "already complete")
+                    done += 1
                     continue
                 }
                 guard (step.dependsOn ?? []).allSatisfy({ completed[$0] == true }) else {
                     completed[step.label] = false
                     let skippedRecord = failedRecord(step, recipe: recipe, message: "dependency failed or skipped", outcome: StepExecutionState.skipped.rawValue)
                     record.steps.append(skippedRecord)
+                    progress.stepSkipped(index: index, total: total, label: step.label, reason: "dependency failed or skipped")
                     try? await state.record(label: step.label, state: .skipped, message: "dependency failed or skipped")
                     await events.emit(.stepSkipped, stepLabel: step.label, status: "skipped", message: "dependency failed or skipped")
                     overallOK = false
+                    done += 1
                     continue
                 }
                 runnableNow.append(step)
@@ -353,7 +374,11 @@ public final class RecipeRunner {
             for step in runnableNow {
                 await events.emit(.stepQueued, stepLabel: step.label, status: "pending")
             }
-            let results = await runStepWave(runnableNow, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: record.cloudRunId, events: events, state: state, vars: vars)
+            if !runnableNow.isEmpty {
+                progress.progressBar(done: done, total: total, noun: "steps")
+            }
+            let results = await runStepWave(runnableNow, positions: position, total: total, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: record.cloudRunId, events: events, state: state, vars: vars)
+            done += results.count
             for stepRecord in results {
                 completed[stepRecord.label] = stepRecord.unblocksDependents
                 if completed[stepRecord.label] != true { overallOK = false }
@@ -367,6 +392,8 @@ public final class RecipeRunner {
 
     private func runStepWave(
         _ steps: [RecipeStep],
+        positions: [String: Int],
+        total: Int,
         recipe: RecipeDefinition,
         runDir: URL,
         cloud: MentuCloudClient?,
@@ -379,9 +406,10 @@ public final class RecipeRunner {
         let semaphore = AsyncSemaphore(value: limit)
         return await withTaskGroup(of: StepRunRecord.self) { group in
                 for step in steps {
+                    let index = positions[step.label] ?? 0
                     group.addTask {
                         await semaphore.wait()
-                    let record = await self.runStepSafely(step, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: cloudRunId, events: events, state: state, vars: vars)
+                    let record = await self.runStepSafely(step, index: index, total: total, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: cloudRunId, events: events, state: state, vars: vars)
                     await semaphore.signal()
                     return record
                 }
@@ -396,6 +424,8 @@ public final class RecipeRunner {
 
     private func runStepSafely(
         _ step: RecipeStep,
+        index: Int,
+        total: Int,
         recipe: RecipeDefinition,
         runDir: URL,
         cloud: MentuCloudClient?,
@@ -405,12 +435,10 @@ public final class RecipeRunner {
         vars: [String: String]
     ) async -> StepRunRecord {
         do {
-            return try await runStep(step, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: cloudRunId, events: events, state: state, vars: vars)
+            return try await runStep(step, index: index, total: total, recipe: recipe, runDir: runDir, cloud: cloud, cloudRunId: cloudRunId, events: events, state: state, vars: vars)
         } catch {
             let message = cleanErrorMessage(String(describing: error))
-            if !options.quiet {
-                FileHandle.standardOutput.write(Data("Error: \(message)\n".utf8))
-            }
+            progress.stepFailed(index: index, total: total, label: step.label, message: message)
             let failed = failedRecord(step, recipe: recipe, message: message)
             try? await state.record(label: step.label, state: .failed, message: message)
             await events.emit(.error, stepLabel: step.label, status: "failed", message: message)
@@ -495,10 +523,13 @@ public final class RecipeRunner {
         if parallel {
             let limit = max(1, options.maxParallel ?? recipe.maxParallel ?? nodes.count)
             let semaphore = AsyncSemaphore(value: limit)
+            progress.progressBar(done: 0, total: nodes.count, noun: "recipes")
             let results = await withTaskGroup(of: StepRunRecord.self) { group in
                 for node in nodes {
                     let label = node.label ?? node.recipe
                     if await state.shouldSkipCompleted(label: label, retryStep: retryStep) {
+                        progress.layer(state: .skipped, label: label, seconds: nil,
+                                       deps: node.dependsOn ?? [], waitingOn: [], outcome: "already complete")
                         await events.emit(.stepSkipped, stepLabel: label, status: "success", message: "already complete")
                         continue
                     }
@@ -519,13 +550,19 @@ public final class RecipeRunner {
         }
 
         var ok = true
+        var done = 0
         for node in nodes {
             let label = node.label ?? node.recipe
             if await state.shouldSkipCompleted(label: label, retryStep: retryStep) {
+                progress.layer(state: .skipped, label: label, seconds: nil,
+                               deps: node.dependsOn ?? [], waitingOn: [], outcome: "already complete")
                 await events.emit(.stepSkipped, stepLabel: label, status: "success", message: "already complete")
+                done += 1
                 continue
             }
+            progress.progressBar(done: done, total: nodes.count, noun: "recipes")
             let result = await runChildRecipe(node, parent: recipe, runDir: runDir, events: events, state: state, vars: vars)
+            done += 1
             record.steps.append(result)
             try write(record, to: runDir.appendingPathComponent("run.json"))
             if !result.unblocksDependents {
@@ -549,21 +586,33 @@ public final class RecipeRunner {
         let ordered = try store.topologicalOrder(nodes)
         var completed: [String: Bool] = [:]
         var ok = true
+        var done = 0
         for node in ordered {
             let label = node.label ?? node.recipe
+            let deps = node.dependsOn ?? []
             if await state.shouldSkipCompleted(label: label, retryStep: retryStep) {
                 completed[label] = true
+                progress.layer(state: .skipped, label: label, seconds: nil,
+                               deps: deps, waitingOn: [], outcome: "already complete")
                 await events.emit(.stepSkipped, stepLabel: label, status: "success", message: "already complete")
+                done += 1
                 continue
             }
-            guard (node.dependsOn ?? []).allSatisfy({ completed[$0] == true }) else {
+            guard deps.allSatisfy({ completed[$0] == true }) else {
                 completed[label] = false
+                // Name the upstream layers that did not clear, which is the
+                // question a halted graph always raises.
+                progress.layer(state: .queued, label: label, seconds: nil, deps: deps,
+                               waitingOn: deps.filter { completed[$0] != true }, outcome: nil)
                 try? await state.record(label: label, state: .skipped, message: "dependency failed or skipped")
                 await events.emit(.stepSkipped, stepLabel: label, status: "skipped", message: "dependency failed or skipped")
                 ok = false
+                done += 1
                 continue
             }
+            progress.progressBar(done: done, total: ordered.count, noun: "recipes")
             let result = await runChildRecipe(node, parent: recipe, runDir: runDir, events: events, state: state, vars: vars)
+            done += 1
             completed[label] = result.unblocksDependents
             record.steps.append(result)
             try write(record, to: runDir.appendingPathComponent("run.json"))
@@ -574,9 +623,12 @@ public final class RecipeRunner {
 
     private func runChildRecipe(_ node: RecipeNode, parent: RecipeDefinition, runDir: URL, events: RunEventWriter, state: RunStateStore, vars: [String: String]) async -> StepRunRecord {
         let label = node.label ?? node.recipe
+        let deps = node.dependsOn ?? []
         let start = Date()
         try? await state.record(label: label, state: .running, incrementAttempts: true)
         await events.emit(.stepStarted, stepLabel: label, backend: "recipe", status: "running")
+        progress.layer(state: .running, label: label, seconds: 0,
+                       deps: deps, waitingOn: [], outcome: "running")
         var childVars = vars
         for (key, value) in node.vars ?? [:] { childVars[key] = value }
         let child = RecipeRunner(options: RunOptions(
@@ -597,6 +649,9 @@ public final class RecipeRunner {
             let childState: StepExecutionState = childRecord.outcome == "ok" ? .success : .failed
             try? await state.record(label: label, state: childState)
             await events.emit(.stepFinished, stepLabel: label, backend: "recipe", status: childState.rawValue)
+            progress.layer(state: childState == .success ? .ok : .failed, label: label,
+                           seconds: Int(Date().timeIntervalSince(start)), deps: deps,
+                           waitingOn: [], outcome: childState == .success ? "ok" : "failed")
             return StepRunRecord(
                 label: label,
                 backend: "recipe",
@@ -621,6 +676,9 @@ public final class RecipeRunner {
             try? String(describing: error).write(to: runDir.appendingPathComponent(errorFile), atomically: true, encoding: .utf8)
             try? await state.record(label: label, state: .failed, message: String(describing: error))
             await events.emit(.stepFinished, stepLabel: label, backend: "recipe", status: StepExecutionState.failed.rawValue)
+            progress.layer(state: .failed, label: label,
+                           seconds: Int(Date().timeIntervalSince(start)), deps: deps,
+                           waitingOn: [], outcome: cleanErrorMessage(String(describing: error)))
             return StepRunRecord(
                 label: label,
                 backend: "recipe",
@@ -645,6 +703,8 @@ public final class RecipeRunner {
 
     private func runStep(
         _ step: RecipeStep,
+        index: Int,
+        total: Int,
         recipe: RecipeDefinition,
         runDir: URL,
         cloud: MentuCloudClient?,
@@ -705,9 +765,8 @@ public final class RecipeRunner {
             } else {
                 try? await state.record(label: step.label, state: .running, incrementAttempts: true)
             }
-            if !options.quiet {
-                FileHandle.standardOutput.write(Data("▶ \(step.label) · \(adapter.name)\n".utf8))
-            }
+            progress.stepStarted(index: index, total: total, label: step.label,
+                                 engine: adapter.name, attempt: attempt)
             let result = try await adapter.execute(
                 AdapterRequest(
                     prompt: prompt,
@@ -725,9 +784,7 @@ public final class RecipeRunner {
                     workingDirectory: stepDir
                 ),
                 eventSink: { text in
-                    if !self.options.quiet {
-                        FileHandle.standardOutput.write(Data(text.utf8))
-                    }
+                    self.progress.stream(text)
                 }
             )
             lastResult = result
@@ -867,6 +924,17 @@ public final class RecipeRunner {
         await events.emit(.hookFinished, stepLabel: step.label, status: lastLocalComplete ? "ok" : "failed", data: ["event": lastLocalComplete ? "after_step" : "on_error"])
         await events.emit(.stepFinished, stepLabel: step.label, backend: adapter.name, status: stepState.rawValue)
 
+        let elapsedSeconds = Int(Date().timeIntervalSince(start))
+        progress.stepFinished(
+            index: index,
+            total: total,
+            label: step.label,
+            engine: adapter.name,
+            seconds: elapsedSeconds,
+            complete: lastLocalComplete,
+            detail: lastLocalComplete ? warnings.first : "exit \(result.exitCode)"
+        )
+
         return StepRunRecord(
             label: step.label,
             backend: adapter.name,
@@ -877,7 +945,7 @@ public final class RecipeRunner {
             localComplete: lastLocalComplete,
             cloudComplete: cloudComplete,
             trustScore: trustScore,
-            durationSeconds: Int(Date().timeIntervalSince(start)),
+            durationSeconds: elapsedSeconds,
             attempts: attempts,
             inputTokens: result.inputTokens,
             outputTokens: result.outputTokens,
