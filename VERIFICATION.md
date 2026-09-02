@@ -3,8 +3,8 @@
 Every release binary is built by GitHub Actions from the tagged source and
 published with a build provenance attestation. Nothing is built on a
 maintainer laptop. This page shows the exact commands a stranger can run to
-verify a release, together with the real transcript from the `v0.2.1`
-release, executed on 2026-08-22 against the public assets with no local
+verify a release, together with the real transcript from the `v0.2.2`
+release, executed on 2026-09-02 against the public assets with no local
 state.
 
 ## What the attestation proves
@@ -24,14 +24,54 @@ faithful product of the visible source at the visible tag.
 Requires `curl`, `shasum`, and the [GitHub CLI](https://cli.github.com) (`gh`).
 
 ```sh
-curl -sLO https://github.com/mentu-ai/mentu-recipes/releases/download/v0.2.1/mentu-recipes-macos-arm64
-curl -sLO https://github.com/mentu-ai/mentu-recipes/releases/download/v0.2.1/checksums.txt
+curl -sLO https://github.com/mentu-ai/mentu-recipes/releases/download/v0.2.2/mentu-recipes-macos-arm64
+curl -sLO https://github.com/mentu-ai/mentu-recipes/releases/download/v0.2.2/checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
 gh attestation verify mentu-recipes-macos-arm64 --repo mentu-ai/mentu-recipes
 ```
 
 On Intel, substitute `mentu-recipes-macos-x86_64` in both the download and
 the verify command.
+
+## Transcript, v0.2.2, 2026-09-02
+
+Checksum:
+
+```text
+$ shasum -a 256 -c checksums.txt --ignore-missing
+mentu-recipes-macos-arm64: OK
+```
+
+Attestation (`--format json`, summarized fields):
+
+```text
+attestations found: 1
+source repository:  https://github.com/mentu-ai/mentu-recipes
+build signer:       .github/workflows/release.yml@refs/tags/v0.2.2
+subject sha256:     dda5297933686788e9b94c22fc43824c5c22a849af77f6e3109c686407466458
+exit code:          0
+```
+
+Published checksums for the release:
+
+```text
+dda5297933686788e9b94c22fc43824c5c22a849af77f6e3109c686407466458  mentu-recipes-macos-arm64
+dcb0d6d64c2a9795b84695282452571127abf352bc9f11bec3598b409612a714  mentu-recipes-macos-x86_64
+```
+
+Version stamp (new in this release; the release workflow refuses a tag that
+does not match it):
+
+```text
+$ ./mentu-recipes-macos-arm64 --version
+mentu-recipes 0.2.2
+```
+
+The signed and notarized package for the cask and the `get.mentu.ai`
+installer was built from the same tag with `scripts/release-macos.sh`,
+notarized and stapled, and attached to the release as
+`mentu-recipes-0.2.2-macos-arm64.pkg`
+(sha256 `8c644b5192f9466e4b414e69e37a4ee33dff55cb723c9f95f7ccd8bc1bb5101a`).
 
 ## Transcript, v0.2.1, 2026-08-22
 
