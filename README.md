@@ -22,6 +22,7 @@ files, so they diff, review and version like the rest of your code.
 
 | I want to | Start here |
 | --- | --- |
+| **See it work in one minute**, no credentials | `mentu-recipes setup` ([quick start](docs/quick-start.md)) |
 | **Run a recipe** and see the contract enforced | [Run a recipe](#run-a-recipe) |
 | **Author a recipe** of my own | [Author a recipe](#author-a-recipe) |
 | Read **worked examples** with real transcripts | [Examples](#examples) |
@@ -33,6 +34,14 @@ macOS 13 or later and a Swift 6.0 toolchain to build from source. The `shell`
 backend needs nothing else; provider backends need their own credentials.
 
 ## Run a recipe
+
+New here? The first-run wizard shows what is on this Mac, places an example
+recipe in the workspace, runs it with the shell backend, and prints the record:
+
+```sh
+mentu-recipes setup
+```
+
 
 Install the CI-built binary with Homebrew:
 

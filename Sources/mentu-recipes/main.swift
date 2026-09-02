@@ -14,6 +14,8 @@ enum CLI {
             switch command {
             case "init":
                 try initWorkspace()
+            case "setup":
+                try await Setup.run(args)
             case "check":
                 try check(args)
             case "run":
@@ -306,7 +308,11 @@ enum CLI {
         print("""
         Mentu Recipes
 
+        New here? Run `mentu-recipes setup`: it shows what is on this Mac, places an
+        example recipe in the workspace, runs it, and shows you the record.
+
         Usage:
+          mentu-recipes setup [--yes] [--json] [--no-run]
           mentu-recipes init
           mentu-recipes check <recipe-or-path>
           mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]

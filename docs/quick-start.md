@@ -1,46 +1,71 @@
 # Quick Start
 
-Create a workspace:
+The runner is a single macOS binary. The first run takes under a minute and
+needs no credentials.
+
+## 1. Install
 
 ```sh
-mkdir recipe-demo
-cd recipe-demo
-mentu-recipes init
+brew install mentu-ai/tap/mentu-recipes-bin
 ```
 
-Create `.mentu/recipes/hello.json`:
+Other channels (signed installer package, direct download) are in
+[install.md](install.md).
 
-```json
-{
-  "name": "hello",
-  "description": "A local shell smoke test.",
-  "steps": [
-    {
-      "label": "say-hello",
-      "backend": "shell",
-      "prompt": "echo MENTU_RECIPES_COMPLETE",
-      "completion_keyword": "MENTU_RECIPES_COMPLETE"
-    }
-  ]
-}
-```
+## 2. Run the first-run wizard
 
-Validate it:
+Inside any directory you want to use as a workspace:
 
 ```sh
-mentu-recipes check hello
+mkdir recipe-demo && cd recipe-demo
+mentu-recipes setup
 ```
 
-Run it:
+The wizard does four things, and shows you each one:
+
+1. Lists the backends found on this Mac (`claude`, `codex`, `ollama`, and the
+   HTTP providers) and which provider keys are already in the Keychain.
+2. Places an example recipe at `.mentu/recipes/hello-justifiable.json`. It has
+   two shell steps: `produce` writes `examples/.work/hello.md` inside its
+   declared boundary; `prove` checks that the file says what `produce` claimed.
+3. Runs the example with the shell backend, so nothing leaves the machine.
+4. Prints the path of the run record and the commands to try next.
+
+Flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--yes` | Skip the prompt and run the example immediately |
+| `--no-run` | Detect and scaffold only |
+| `--json` | One machine-readable report, no prompts (implies `--yes`) |
+
+## 3. Read the record
 
 ```sh
-mentu-recipes run hello --no-cloud
+find .mentu/runs -maxdepth 2 -type f
 ```
 
-After the run, inspect the local record:
+Every run leaves `run.json`, `events.jsonl`, `baseline.json`, and one
+`stdout`/`stderr` pair per step. Nothing in the record is written after the
+fact; see [run-records.md](run-records.md).
+
+## 4. Use a real backend
+
+If the wizard found `claude` or `codex` on your PATH:
 
 ```sh
-find .mentu/runs -maxdepth 3 -type f
+mentu-recipes run hello-justifiable --backend claude
 ```
 
-You should see a `run.json` file plus step output files.
+The same recipe, the same boundary, the same record. The only difference is
+who does the work.
+
+## 5. Write your own
+
+```sh
+mentu-recipes check hello-justifiable    # validate a recipe
+mentu-recipes doctor hello-justifiable   # explain what would run and why
+```
+
+Copy the example, change the prompts and the declared paths, and read
+[recipe-schema.md](recipe-schema.md) for the full contract.
