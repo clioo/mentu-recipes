@@ -33,6 +33,31 @@ gh attestation verify mentu-recipes-macos-arm64 --repo mentu-ai/mentu-recipes
 On Intel, substitute `mentu-recipes-macos-x86_64` in both the download and
 the verify command.
 
+## Transcript, v0.3.0, 2026-09-02
+
+Run on a clean download of the release assets, then along the installer path
+from the live manifest. Attestation verification prints nothing on success and
+exits 0.
+
+```text
+$ shasum -a 256 -c checksums.txt
+mentu-recipes-macos-arm64: OK
+mentu-recipes-macos-x86_64: OK
+$ gh attestation verify mentu-recipes-macos-arm64 -R mentu-ai/mentu-recipes
+$ ./mentu-recipes-macos-arm64 --version
+mentu-recipes 0.3.0
+$ curl -s https://api.mentu.ai/v1/releases/latest
+{"version":"0.3.0","artifacts":{"macos-arm64":{"url":"https://github.com/mentu-ai/mentu-recipes/releases/download/v0.3.0/mentu-recipes-0.3.0-macos-arm64.pkg","size_bytes":440179,"sha256":"9f07c9238b48834ab6036fa6324408a52f6aabc5a2fba5516d1c6160c61e5972"}}}
+$ curl -sL -o installer.pkg https://github.com/mentu-ai/mentu-recipes/releases/download/v0.3.0/mentu-recipes-0.3.0-macos-arm64.pkg
+$ shasum -a 256 installer.pkg
+9f07c9238b48834ab6036fa6324408a52f6aabc5a2fba5516d1c6160c61e5972  installer.pkg
+$ spctl -a -vv -t install installer.pkg
+installer.pkg: accepted
+source=Notarized Developer ID
+origin=Developer ID Installer: Rashid Azarang (HR8X6TP7J6)
+$ brew install --cask mentu-ai/tap/mentu-recipes (dry: brew fetch)
+```
+
 ## Transcript, v0.2.2, 2026-09-02
 
 Checksum:
