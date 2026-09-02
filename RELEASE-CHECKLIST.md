@@ -9,6 +9,11 @@ One list, in order. Each step consumes the previous step's artifact.
 - [ ] `README.md` Status section reflects a fresh `swift test` run and any new limitation.
 - [ ] `docs/` pages that name a version (`install.md`, `verification.md`) use the new version.
 
+## Merge
+
+- [ ] Merge the release branch locally, not with GitHub's squash button, so the commit is authored by the maintainer identity rather than GitHub's noreply address:
+  `git checkout main && git merge --squash release/vX.Y.Z-prep && git commit && git push origin main`.
+
 ## Tag
 
 - [ ] `git tag vX.Y.Z && git push origin vX.Y.Z`
