@@ -22,6 +22,7 @@ files, so they diff, review and version like the rest of your code.
 
 | I want to | Start here |
 | --- | --- |
+| **See it work in one minute**, no credentials | `mentu-recipes setup` ([quick start](docs/quick-start.md)) |
 | **Run a recipe** and see the contract enforced | [Run a recipe](#run-a-recipe) |
 | **Author a recipe** of my own | [Author a recipe](#author-a-recipe) |
 | Read **worked examples** with real transcripts | [Examples](#examples) |
@@ -33,6 +34,14 @@ macOS 13 or later and a Swift 6.0 toolchain to build from source. The `shell`
 backend needs nothing else; provider backends need their own credentials.
 
 ## Run a recipe
+
+New here? The first-run wizard shows what is on this Mac, places an example
+recipe in the workspace, runs it with the shell backend, and prints the record:
+
+```sh
+mentu-recipes setup
+```
+
 
 Install the CI-built binary with Homebrew:
 
@@ -232,7 +241,7 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 Honest state of this repository, verified on 2026-09-02 on macOS 15 with Swift 6:
 
 - `swift build`: clean, no errors.
-- `swift test`: **38 tests, 0 failures**, in about 2 seconds. No hangs, no
+- `swift test`: **41 tests, 0 failures**, in about 2 seconds. No hangs, no
   crashes. The swift-testing half of the run is empty; every test here is XCTest.
 - All six bundled demo recipes score **100 with no findings** under
   `mentu-recipes doctor`, and all three demos were executed end to end for the

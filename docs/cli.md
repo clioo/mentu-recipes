@@ -1,5 +1,17 @@
 # CLI Reference
 
+## `setup`
+
+```sh
+mentu-recipes setup [--yes] [--json] [--no-run]
+```
+
+First-run wizard. Detects backends on PATH and provider keys in the Keychain,
+scaffolds `hello-justifiable` into `.mentu/recipes` (never overwriting), runs it
+with the shell backend, and prints the run record path. `--yes` skips the
+prompt, `--no-run` stops after scaffolding, `--json` prints one report and
+implies `--yes`.
+
 ## `init`
 
 ```sh
