@@ -46,8 +46,9 @@ find .mentu/runs -maxdepth 2 -type f
 ```
 
 Every run leaves `run.json`, `events.jsonl`, `baseline.json`, and one
-`stdout`/`stderr` pair per step. Nothing in the record is written after the
-fact; see [run-records.md](run-records.md).
+`stdout`/`stderr` pair per step. The files are plain JSON and text, not
+chained, and nothing in this runner verifies them afterwards; see
+[run-records.md](run-records.md).
 
 ## 4. Use a real backend
 
@@ -58,14 +59,21 @@ mentu-recipes run hello-justifiable --backend claude
 ```
 
 The same recipe, the same boundary, the same record. The only difference is
-who does the work.
+who does the work. `claude` and `codex` use the CLI's own login; the HTTP
+providers need a key in the environment or the vault:
+
+```sh
+printf '%s' "$OPENAI_API_KEY" | mentu-recipes vault set OPENAI_API_KEY
+```
 
 ## 5. Write your own
 
 ```sh
 mentu-recipes check hello-justifiable    # validate a recipe
-mentu-recipes doctor hello-justifiable   # explain what would run and why
+mentu-recipes doctor hello-justifiable   # score the contract, list findings
 ```
 
-Copy the example, change the prompts and the declared paths, and read
+`check` validates the file against the schema. `doctor` scores the recipe out
+of 100 and lists every finding with a code; `--strict` turns warnings into a
+failing exit. Copy the example, change the prompts and the declared paths, and read
 [recipe-schema.md](recipe-schema.md) for the full contract.
