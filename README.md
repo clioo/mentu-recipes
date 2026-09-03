@@ -18,11 +18,39 @@ Steps run against OpenAI, the Claude and Codex CLIs, DeepSeek,
 OpenAI-compatible endpoints, local model servers, or a local shell. Recipes are
 files, so they diff, review and version like the rest of your code.
 
-## Get Started, choose your path
+## Install
+
+```sh
+curl -fsSL https://get.mentu.ai | sh
+mentu-recipes setup
+```
+
+Apple Silicon and Intel, macOS 13 or later. The script checks the download
+against the checksums published with the release and installs into
+`~/.local/bin`, with no `sudo` and no shell profile edits. It is
+[scripts/install.sh](scripts/install.sh) in this repository, so you can read it
+first. Homebrew, the signed package and a source build are in
+[docs/install.md](docs/install.md).
+
+`setup` shows what is on this Mac, writes one example recipe where you are,
+runs it with the shell backend, and prints the record.
+
+### Using Claude Code?
+
+```sh
+claude plugin marketplace add mentu-ai/mentu-recipes
+claude plugin install mentu-recipes@mentu
+```
+
+This repository is a Claude Code marketplace. The plugin carries two skills,
+`writing-recipes` and `reading-run-records`, and two commands,
+`/mentu-recipes:new` and `/mentu-recipes:run`. See
+[plugins/mentu-recipes](plugins/mentu-recipes).
+
+## Then choose your path
 
 | I want to | Start here |
 | --- | --- |
-| **See it work in one minute**, no credentials | `mentu-recipes setup` ([quick start](docs/quick-start.md)) |
 | **Run a recipe** and see the contract enforced | [Run a recipe](#run-a-recipe) |
 | **Author a recipe** of my own | [Author a recipe](#author-a-recipe) |
 | Read **worked examples** with real transcripts | [Examples](#examples) |
