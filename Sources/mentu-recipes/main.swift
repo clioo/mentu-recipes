@@ -3,6 +3,9 @@ import MentuRecipesCore
 
 enum CLI {
     static func main() async -> Int32 {
+        // Line buffering, so piping to tee or a log keeps the wizard's output
+        // in the same order the runner's progress arrives.
+        setvbuf(stdout, nil, _IOLBF, 0)
         var args = Array(CommandLine.arguments.dropFirst())
         guard let command = args.first else {
             help()
@@ -10,12 +13,21 @@ enum CLI {
         }
         args.removeFirst()
 
+        // --help anywhere in a subcommand's arguments prints that subcommand's
+        // usage and does nothing else. It must never run the command.
+        if args.contains("--help") || args.contains("-h") {
+            usage(for: command)
+            return 0
+        }
+
         do {
             switch command {
             case "init":
                 try initWorkspace()
             case "setup":
                 try await Setup.run(args)
+            case "list", "ls":
+                try list(args)
             case "check":
                 try check(args)
             case "run":
@@ -48,6 +60,9 @@ enum CLI {
             return 0
         } catch {
             fputs("mentu-recipes: \(error)\n", stderr)
+            if let recipeError = error as? RecipeError, case .recipeNotFound = recipeError {
+                fputs("Run `mentu-recipes list` to see this workspace's recipes, or `mentu-recipes setup` to place an example here.\n", stderr)
+            }
             return 1
         }
     }
@@ -304,6 +319,79 @@ enum CLI {
         return value
     }
 
+    /// One line per subcommand, taken from the same source as the main help.
+    static let usageLines: [String: String] = [
+        "setup": "mentu-recipes setup [--yes] [--json] [--no-run]",
+        "init": "mentu-recipes init",
+        "list": "mentu-recipes list [--json]",
+        "ls": "mentu-recipes list [--json]",
+        "check": "mentu-recipes check <recipe-or-path>",
+        "run": "mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]",
+        "resume": "mentu-recipes resume <run-id> [--workspace PATH] [--backend NAME] [--model MODEL] [--max-parallel N] [--cloud] [--quiet]",
+        "retry-step": "mentu-recipes retry-step <run-id> <step-label> [--workspace PATH] [--backend NAME] [--model MODEL] [--max-parallel N] [--cloud] [--quiet]",
+        "report": "mentu-recipes report <run-id> [--format markdown|json|csv]",
+        "doctor": "mentu-recipes doctor <recipe-or-path> [--format markdown|json|csv] [--strict]",
+        "analyze-runs": "mentu-recipes analyze-runs [--workspace PATH] [--format markdown|json|csv] [--export-jsonl PATH]",
+        "adapters": "mentu-recipes adapters [--json|--explain NAME]",
+        "vault": "mentu-recipes vault <set|get|list|delete> ...",
+        "scan": "mentu-recipes scan [path] [--artifact PATH]",
+    ]
+
+    static func usage(for command: String) {
+        if let line = usageLines[command] {
+            print("Usage:\n  \(line)")
+        } else {
+            help()
+        }
+    }
+
+    /// The recipes this workspace can run, so nobody has to guess a name.
+    static func list(_ args: [String]) throws {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let paths = RecipePaths(workspace: cwd)
+        let dir = paths.projectRecipes
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasSuffix(".json") }
+            .sorted()
+
+        if args.contains("--json") {
+            var rows: [[String: Any]] = []
+            for file in files {
+                let url = dir.appendingPathComponent(file)
+                let name = String(file.dropLast(5))
+                var row: [String: Any] = ["name": name, "path": url.path]
+                if let data = try? Data(contentsOf: url),
+                   let recipe = try? JSONDecoder().decode(RecipeDefinition.self, from: data) {
+                    row["steps"] = recipe.steps.count
+                    if let description = recipe.description { row["description"] = description }
+                }
+                rows.append(row)
+            }
+            let out = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
+            print(String(data: out, encoding: .utf8) ?? "[]")
+            return
+        }
+
+        if files.isEmpty {
+            print("No recipes in \(dir.path)")
+            print("Run `mentu-recipes setup` to place an example here.")
+            return
+        }
+        for file in files {
+            let name = String(file.dropLast(5))
+            let url = dir.appendingPathComponent(file)
+            var detail = ""
+            if let data = try? Data(contentsOf: url),
+               let recipe = try? JSONDecoder().decode(RecipeDefinition.self, from: data) {
+                detail = "  \(recipe.steps.count) step(s)"
+                if let description = recipe.description, !description.isEmpty {
+                    detail += " · \(description)"
+                }
+            }
+            print("\(name)\(detail)")
+        }
+    }
+
     static func help() {
         print("""
         Mentu Recipes
@@ -314,6 +402,7 @@ enum CLI {
         Usage:
           mentu-recipes setup [--yes] [--json] [--no-run]
           mentu-recipes init
+          mentu-recipes list [--json]
           mentu-recipes check <recipe-or-path>
           mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
           mentu-recipes resume <run-id> [--workspace PATH]

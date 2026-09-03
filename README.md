@@ -32,8 +32,9 @@ against the checksums published with the release and installs into
 first. Homebrew, the signed package and a source build are in
 [docs/install.md](docs/install.md).
 
-`setup` shows what is on this Mac, writes one example recipe where you are,
-runs it with the shell backend, and prints the record.
+`setup` shows what is on this Mac, writes one example recipe where you are, runs
+it with the shell backend, and prints the record. `mentu-recipes list` shows the
+recipes a workspace can run.
 
 ### Using Claude Code?
 
@@ -269,7 +270,7 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 Honest state of this repository, verified on 2026-09-02 on macOS 15 with Swift 6:
 
 - `swift build`: clean, no errors.
-- `swift test`: **41 tests, 0 failures**, in about 2 seconds. No hangs, no
+- `swift test`: **42 tests, 0 failures**, in about 2 seconds. No hangs, no
   crashes. The swift-testing half of the run is empty; every test here is XCTest.
 - All six bundled demo recipes score **100 with no findings** under
   `mentu-recipes doctor`, and all three demos were executed end to end for the

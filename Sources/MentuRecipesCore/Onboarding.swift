@@ -41,6 +41,20 @@ public enum Onboarding {
     }
     """
 
+    /// Keeps the directories the runner owns out of the person's `git status`.
+    /// Recipes and prompts stay tracked, because those are their work.
+    /// Returns true when this call wrote the file.
+    @discardableResult
+    public static func ignoreRunArtifacts(in workspace: URL) throws -> Bool {
+        let paths = RecipePaths(workspace: workspace)
+        let dir = paths.projectRecipes.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(".gitignore")
+        if FileManager.default.fileExists(atPath: url.path) { return false }
+        try "runs/\ncache/\n".write(to: url, atomically: true, encoding: .utf8)
+        return true
+    }
+
     /// Places the example under `.mentu/recipes` unless a file is already there.
     /// Returns the file URL and whether it was written by this call.
     @discardableResult
