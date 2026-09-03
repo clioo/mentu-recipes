@@ -65,6 +65,56 @@ mv -f "$tmp/$asset" "$INSTALL_DIR/mentu-recipes" || die "cannot write to $INSTAL
 installed="$("$INSTALL_DIR/mentu-recipes" --version 2>/dev/null || echo "mentu-recipes $tag")"
 say "Installed  $INSTALL_DIR/mentu-recipes  ($installed)"
 
+# A second copy earlier on PATH would answer instead of the one just written,
+# and older ones do not understand `setup`. Name every copy and how to remove it.
+conflicts=""
+saved_ifs="$IFS"
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || dir="."
+  candidate="$dir/mentu-recipes"
+  [ "$candidate" = "$INSTALL_DIR/mentu-recipes" ] && continue
+  [ -x "$candidate" ] || continue
+  case "$conflicts" in *"$candidate "*) continue ;; esac
+  # An older build answers --version with its whole help, so keep one line
+  # and only when it looks like a version.
+  candidate_version="$("$candidate" --version 2>/dev/null | head -1)"
+  case "$candidate_version" in
+    "mentu-recipes "[0-9]*) ;;
+    *) candidate_version="an older build, which does not understand setup" ;;
+  esac
+  conflicts="${conflicts}${candidate} (${candidate_version})
+"
+done
+IFS="$saved_ifs"
+
+if [ -n "$conflicts" ]; then
+  say ""
+  say "Another mentu-recipes is already on your PATH:"
+  printf '%s' "$conflicts" | while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    say "  $line"
+  done
+  resolved="$(command -v mentu-recipes 2>/dev/null || true)"
+  if [ -n "$resolved" ] && [ "$resolved" != "$INSTALL_DIR/mentu-recipes" ]; then
+    say ""
+    say "The name still resolves to $resolved, so the commands below would run that one."
+    say "Older builds do not understand \`setup\`. Remove the copy you do not want:"
+  else
+    say ""
+    say "Remove the copy you do not want:"
+  fi
+  printf '%s' "$conflicts" | while IFS= read -r line; do
+    path="${line%% (*}"
+    [ -n "$path" ] || continue
+    case "$path" in
+      /opt/homebrew/*|/usr/local/Cellar/*) say "  brew uninstall mentu-recipes-bin" ;;
+      /usr/local/bin/*)                    say "  sudo rm $path && sudo pkgutil --forget ai.mentu.recipes" ;;
+      *)                                   say "  rm $path" ;;
+    esac
+  done
+fi
+
 on_path=no
 case ":$PATH:" in *":$INSTALL_DIR:"*) on_path=yes ;; esac
 if [ "$on_path" = "no" ]; then

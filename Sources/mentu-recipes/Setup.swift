@@ -29,6 +29,17 @@ enum Setup {
         let next: [String]
     }
 
+    /// The repository a run would commit into, if any.
+    static func gitRoot(for workspace: URL) -> URL? {
+        var dir = workspace.standardizedFileURL
+        while true {
+            if FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path) { return dir }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { return nil }
+            dir = parent
+        }
+    }
+
     static func run(_ args: [String]) async throws {
         let json = args.contains("--json")
         let yes = args.contains("--yes") || json
@@ -87,6 +98,22 @@ enum Setup {
         var ran = false
         var outcome: String?
         var recordPath: String?
+        let repository = gitRoot(for: workspace)
+        if !noRun && !json {
+            print("")
+            if let repository {
+                print("Before you run it")
+                print("           A step that writes inside its declared boundary is committed here,")
+                print("           in \(repository.path), as `chore: mentu-recipes step <label>`.")
+                print("           That commit is the record. Nothing outside the boundary is committed;")
+                print("           it is saved as a patch under .mentu/runs/ instead.")
+                print("           This example commits one file, examples/.work/hello.md.")
+            } else {
+                print("Before you run it")
+                print("           This directory is not a git repository, so nothing can be committed.")
+                print("           The run still works and still writes its record under .mentu/runs/.")
+            }
+        }
         if !noRun {
             var proceed = yes
             if !yes {

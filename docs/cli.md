@@ -19,6 +19,12 @@ else.
 mentu-recipes setup [--yes] [--json] [--no-run]
 ```
 
+Before it offers to run anything, `setup` says what the run will do to this
+directory: a step that writes inside its declared boundary is committed as
+`chore: mentu-recipes step <label>`, and anything outside the boundary is kept
+as a patch under `.mentu/runs/` instead. Outside a git repository it says that
+nothing can be committed.
+
 First-run wizard. Detects backends on PATH and provider keys in the Keychain,
 scaffolds `hello-justifiable` into `.mentu/recipes` (never overwriting), runs it
 with the shell backend, and prints the run record path. `--yes` skips the

@@ -394,26 +394,35 @@ enum CLI {
 
     static func help() {
         print("""
-        Mentu Recipes
+        Mentu Recipes \(MentuRecipesVersion.string)
 
-        New here? Run `mentu-recipes setup`: it shows what is on this Mac, places an
-        example recipe in the workspace, runs it, and shows you the record.
+        New here? Run `mentu-recipes setup`. It shows what is on this Mac, writes one
+        example recipe where you are, runs it, and prints the record it wrote.
 
-        Usage:
-          mentu-recipes setup [--yes] [--json] [--no-run]
-          mentu-recipes init
-          mentu-recipes list [--json]
-          mentu-recipes check <recipe-or-path>
-          mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]
-          mentu-recipes resume <run-id> [--workspace PATH]
-          mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]
-          mentu-recipes report <run-id> [--format markdown|json|csv]
-          mentu-recipes doctor <recipe-or-path> [--format markdown|json|csv] [--strict]
-          mentu-recipes analyze-runs [--workspace PATH] [--format markdown|json|csv] [--export-jsonl PATH]
-          mentu-recipes adapters [--json|--explain NAME]
-          mentu-recipes vault <set|get|list|delete> ...
-          mentu-recipes scan [path] [--artifact PATH]
-          mentu-recipes --version
+        Getting started
+          setup [--yes] [--json] [--no-run]   Set up this directory and run the example
+          list [--json]                       The recipes this workspace can run
+          init                                Create .mentu/recipes and .mentu/prompts
+
+        Running
+          run <recipe> [options]              Run a recipe
+          resume <run-id> [options]           Rerun the steps that did not succeed
+          retry-step <run-id> <label>         Rerun one step of a past run
+
+        Understanding a run
+          report <run-id> [--format F]        What a run did, as markdown, json or csv
+          analyze-runs [--format F]           Patterns across this workspace's runs
+
+        Before you run
+          check <recipe>                      Validate a recipe against the schema
+          doctor <recipe> [--strict]          Score the contract and list every finding
+          adapters [--json|--explain NAME]    The backends available on this Mac
+
+        Credentials and shipping
+          vault <set|get|list|delete> ...     Provider keys in the login Keychain
+          scan [path] [--artifact PATH]       Check a tree or a build before publishing
+
+        Add --help to any command for its options. Docs: https://docs.mentu.ai
         """)
     }
 }
