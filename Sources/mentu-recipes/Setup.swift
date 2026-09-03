@@ -40,7 +40,15 @@ enum Setup {
         let backends = AdapterRegistry.allAdapters().map {
             Report.Backend(name: $0.name, kind: $0.executionKind, available: $0.isAvailable(env: env))
         }
-        let keys = CredentialResolver.listKeychain()
+        // Only the names this runner would actually read. A wizard has no
+        // business listing every secret a person keeps in their Keychain.
+        let relevant = Set(
+            AdapterRegistry.allAdapters().flatMap { adapter -> [String] in
+                guard let http = adapter as? OpenAIChatAdapter else { return [] }
+                return [http.apiKeyEnv, http.apiKeyVault].compactMap { $0 }
+            } + ["ANTHROPIC_API_KEY", "anthropic-api-key", "MENTU_API_KEY", "mentu-api-key", "mentu-api-token"]
+        )
+        let keys = CredentialResolver.listKeychain().filter { relevant.contains($0) }
 
         if !json {
             print("Mentu Recipes \(MentuRecipesVersion.string) · first run")
@@ -53,7 +61,7 @@ enum Setup {
             }
             if keys.isEmpty {
                 print("")
-                print("Keychain   no provider keys stored; add one later with `mentu-recipes vault set <name>`")
+                print("Keychain   no provider keys stored; add one later with `printf '%s' \"$KEY\" | mentu-recipes vault set <name>`")
             } else {
                 print("")
                 print("Keychain   \(keys.joined(separator: ", "))")
@@ -62,11 +70,17 @@ enum Setup {
 
         // 2. Place the example recipe.
         let (exampleURL, wrote) = try Onboarding.scaffoldExample(into: workspace)
+        let ignoredRunArtifacts = try Onboarding.ignoreRunArtifacts(in: workspace)
         if !json {
             print("")
             print("Example    \(exampleURL.path)\(wrote ? "" : "  (already present)")")
             print("           Two shell steps. The first writes examples/.work/hello.md inside its declared boundary;")
             print("           the second proves the file says what the first claimed. No credentials needed.")
+            if ignoredRunArtifacts {
+                print("")
+                print("Ignored    .mentu/.gitignore now keeps run records and cache out of `git status`.")
+                print("           Your recipes and prompts stay tracked.")
+            }
         }
 
         // 3. Run it, unless told not to.

@@ -1,5 +1,18 @@
 # CLI Reference
 
+## `list`
+
+```sh
+mentu-recipes list [--json]
+```
+
+The recipes in `.mentu/recipes`, one per line with the step count and the
+description. `--json` prints name, path, steps and description per recipe. With
+an empty workspace it says so and names `setup`.
+
+Every subcommand accepts `--help` and prints its usage without doing anything
+else.
+
 ## `setup`
 
 ```sh

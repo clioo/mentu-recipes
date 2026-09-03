@@ -21,6 +21,22 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: second.url, encoding: .utf8), "custom")
     }
 
+    func testIgnoreRunArtifactsWritesOnceAndKeepsRecipesTracked() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-ignore-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertTrue(try Onboarding.ignoreRunArtifacts(in: dir))
+        let url = dir.appendingPathComponent(".mentu/.gitignore")
+        let body = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(body.contains("runs/"))
+        XCTAssertTrue(body.contains("cache/"))
+        XCTAssertFalse(body.contains("recipes"))
+        XCTAssertFalse(body.contains("prompts"))
+
+        try "custom\n".write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertFalse(try Onboarding.ignoreRunArtifacts(in: dir))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "custom\n")
+    }
+
     func testExampleRunsWithShellBackend() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-run-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
