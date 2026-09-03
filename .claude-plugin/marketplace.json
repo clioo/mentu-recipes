@@ -1,0 +1,19 @@
+{
+  "name": "mentu",
+  "description": "Mentu plugins for Claude Code. Write agent work as recipes the runner can hold to a declared boundary, and read the record it leaves.",
+  "owner": {
+    "name": "Mentu",
+    "email": "hello@mentu.ai"
+  },
+  "plugins": [
+    {
+      "name": "mentu-recipes",
+      "source": "./plugins/mentu-recipes",
+      "description": "Turn multi-step work into a Mentu recipe, run it with the mentu-recipes CLI, and read the run record. Skills for authoring and for reading records, plus commands to scaffold and run.",
+      "version": "0.3.0",
+      "author": { "name": "Mentu" },
+      "category": "workflow",
+      "homepage": "https://mentu.ai"
+    }
+  ]
+}

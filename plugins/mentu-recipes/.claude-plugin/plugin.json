@@ -1,0 +1,10 @@
+{
+  "name": "mentu-recipes",
+  "description": "Write agent work as recipes the runner holds to a declared write boundary, and read the record it leaves.",
+  "version": "0.3.0",
+  "author": { "name": "Mentu", "email": "hello@mentu.ai" },
+  "homepage": "https://mentu.ai",
+  "repository": "https://github.com/mentu-ai/mentu-recipes",
+  "license": "LicenseRef-Mentu-Source-Available-1.0",
+  "keywords": ["recipes", "macos", "runner", "evidence"]
+}
