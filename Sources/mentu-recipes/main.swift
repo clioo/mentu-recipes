@@ -32,6 +32,8 @@ enum CLI {
                 try check(args)
             case "run":
                 try await run(args)
+            case "plan":
+                try plan(args)
             case "resume":
                 try await resume(args)
             case "retry-step":
@@ -86,6 +88,7 @@ enum CLI {
 
     static func run(_ args: [String]) async throws {
         guard let name = args.first else { throw RecipeError.failed("Usage: mentu-recipes run <recipe-or-path>") }
+        try validateExecutionArguments(Array(args.dropFirst()))
         let parsed = parseOptions(Array(args.dropFirst()))
         let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
         let vars = parseVars(parsed["vars"] ?? "")
@@ -96,7 +99,9 @@ enum CLI {
             vars: vars,
             cloudEnabled: parsed["cloud"] == "true",
             quiet: parsed["quiet"] == "true",
-            maxParallel: parsed["max-parallel"].flatMap(Int.init)
+            maxParallel: parsed["max-parallel"].flatMap(Int.init),
+            planDigest: parsed["plan-digest"],
+            requestKey: parsed["request-key"]
         ))
         let record = try await runner.run(name)
         let ok = record.outcome == "ok"
@@ -107,15 +112,19 @@ enum CLI {
 
     static func resume(_ args: [String]) async throws {
         guard let runId = args.first else { throw RecipeError.failed("Usage: mentu-recipes resume <run-id> [--workspace PATH]") }
+        try validateExecutionArguments(Array(args.dropFirst()))
         let parsed = parseOptions(Array(args.dropFirst()))
         let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
         let runner = RecipeRunner(options: RunOptions(
             workspace: workspace,
             backend: parsed["backend"],
             model: parsed["model"],
+            vars: parseVars(parsed["vars"] ?? ""),
             cloudEnabled: parsed["cloud"] == "true",
             quiet: parsed["quiet"] == "true",
-            maxParallel: parsed["max-parallel"].flatMap(Int.init)
+            maxParallel: parsed["max-parallel"].flatMap(Int.init),
+            planDigest: parsed["plan-digest"],
+            requestKey: parsed["request-key"]
         ))
         let record = try await runner.resume(runId: runId)
         print("\n\(record.outcome == "ok" ? "✓" : "✗") \(record.recipeName) · \(record.outcome)")
@@ -126,15 +135,19 @@ enum CLI {
         guard args.count >= 2 else { throw RecipeError.failed("Usage: mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]") }
         let runId = args[0]
         let step = args[1]
+        try validateExecutionArguments(Array(args.dropFirst(2)))
         let parsed = parseOptions(Array(args.dropFirst(2)))
         let workspace = URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath)
         let runner = RecipeRunner(options: RunOptions(
             workspace: workspace,
             backend: parsed["backend"],
             model: parsed["model"],
+            vars: parseVars(parsed["vars"] ?? ""),
             cloudEnabled: parsed["cloud"] == "true",
             quiet: parsed["quiet"] == "true",
-            maxParallel: parsed["max-parallel"].flatMap(Int.init)
+            maxParallel: parsed["max-parallel"].flatMap(Int.init),
+            planDigest: parsed["plan-digest"],
+            requestKey: parsed["request-key"]
         ))
         let record = try await runner.resume(runId: runId, retryStep: step)
         print("\n\(record.outcome == "ok" ? "✓" : "✗") \(record.recipeName) · \(record.outcome)")
@@ -272,7 +285,7 @@ enum CLI {
         while i < args.count {
             let arg = args[i]
             switch arg {
-            case "--workspace", "--backend", "--model", "--format", "--max-parallel", "--export-jsonl":
+            case "--workspace", "--backend", "--model", "--format", "--max-parallel", "--export-jsonl", "--plan-digest", "--request-key":
                 if i + 1 < args.count {
                     result[String(arg.dropFirst(2))] = args[i + 1]
                     i += 2
@@ -310,6 +323,42 @@ enum CLI {
         return vars
     }
 
+    static func validateExecutionArguments(_ args: [String]) throws {
+        let values: Set<String> = ["--workspace", "--backend", "--model", "--max-parallel", "--var", "--plan-digest", "--request-key"]
+        let flags: Set<String> = ["--quiet", "--cloud", "--no-cloud"]
+        var seen = Set<String>()
+        var index = 0
+        while index < args.count {
+            let flag = args[index]
+            guard seen.insert(flag).inserted || flag == "--var" else { throw RecipeError.failed("Duplicate option: \(flag)") }
+            if values.contains(flag) {
+                guard index + 1 < args.count, !args[index + 1].hasPrefix("--"), !args[index + 1].isEmpty else {
+                    throw RecipeError.failed("Missing value for \(flag)")
+                }
+                if flag == "--max-parallel", (Int(args[index + 1]) ?? 0) < 1 { throw RecipeError.failed("Invalid parallel limit") }
+                index += 2
+            } else if flags.contains(flag) {
+                index += 1
+            } else {
+                throw RecipeError.failed("Unknown execution option: \(flag)")
+            }
+        }
+    }
+
+    static func plan(_ args: [String]) throws {
+        guard let name = args.first else { throw RecipeError.failed("Usage: mentu-recipes plan <recipe> [options]") }
+        try validateExecutionArguments(Array(args.dropFirst()))
+        let parsed = parseOptions(Array(args.dropFirst()))
+        let options = RunOptions(
+            workspace: URL(fileURLWithPath: parsed["workspace"] ?? FileManager.default.currentDirectoryPath),
+            backend: parsed["backend"], model: parsed["model"], vars: parseVars(parsed["vars"] ?? ""),
+            cloudEnabled: parsed["cloud"] == "true", maxParallel: parsed["max-parallel"].flatMap(Int.init)
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        print(String(decoding: try encoder.encode(ExecutionPlan.resolve(name, options: options)), as: UTF8.self))
+    }
+
     static func readStdinSecret() -> String {
         let data = FileHandle.standardInput.readDataToEndOfFile()
         var value = String(data: data, encoding: .utf8) ?? ""
@@ -326,6 +375,7 @@ enum CLI {
         "list": "mentu-recipes list [--json]",
         "ls": "mentu-recipes list [--json]",
         "check": "mentu-recipes check <recipe-or-path>",
+        "plan": "mentu-recipes plan <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--var KEY=VALUE] [--max-parallel N] [--cloud]",
         "run": "mentu-recipes run <recipe-or-path> [--workspace PATH] [--backend NAME] [--model MODEL] [--cloud] [--max-parallel N] [--var KEY=VALUE]",
         "resume": "mentu-recipes resume <run-id> [--workspace PATH] [--backend NAME] [--model MODEL] [--max-parallel N] [--cloud] [--quiet]",
         "retry-step": "mentu-recipes retry-step <run-id> <step-label> [--workspace PATH] [--backend NAME] [--model MODEL] [--max-parallel N] [--cloud] [--quiet]",
@@ -405,9 +455,14 @@ enum CLI {
           init                                Create .mentu/recipes and .mentu/prompts
 
         Running
+          plan <recipe> [options]             Inspect a content-bound execution digest
           run <recipe> [options]              Run a recipe
           resume <run-id> [options]           Rerun the steps that did not succeed
           retry-step <run-id> <label>         Rerun one step of a past run
+
+        Admitted execution (opt-in)
+          Add --plan-digest SHA256 --request-key KEY to run, resume or retry-step.
+          Repeat the original plan options when recovering an admitted run.
 
         Understanding a run
           report <run-id> [--format F]        What a run did, as markdown, json or csv

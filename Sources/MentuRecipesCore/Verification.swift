@@ -32,7 +32,8 @@ public enum Verification {
     public static func evaluate(
         _ requirements: VerifyRequirements?,
         stepDir: URL,
-        preStepBaseline: WorkspaceBaseline?
+        preStepBaseline: WorkspaceBaseline?,
+        environment: [String: String]? = nil
     ) async throws -> VerificationOutcome {
         var warnings: [VerificationIssue] = []
         var errors: [VerificationIssue] = []
@@ -104,7 +105,7 @@ public enum Verification {
             let result = try await ProcessRunner.run(
                 executable: "/bin/sh",
                 arguments: ["-c", command],
-                env: ProcessInfo.processInfo.environment,
+                env: environment ?? ProcessInfo.processInfo.environment,
                 workingDirectory: stepDir,
                 timeout: 300,
                 maxOutputBytes: 1_000_000,

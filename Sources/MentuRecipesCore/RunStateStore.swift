@@ -40,6 +40,7 @@ public struct RecipeRunState: Codable, Sendable {
     public var model: String?
     public var vars: [String: String]
     public var steps: [String: StepStateRecord]
+    public var childRunIds: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case runId = "run_id"
@@ -48,6 +49,7 @@ public struct RecipeRunState: Codable, Sendable {
         case startedAt = "started_at"
         case updatedAt = "updated_at"
         case backend, model, vars, steps
+        case childRunIds = "child_run_ids"
     }
 }
 
@@ -130,14 +132,35 @@ public actor RunStateStore {
     }
 
     public func markRetryTarget(_ label: String) async throws {
+        guard state.steps[label] != nil else { throw RecipeError.failed("Unknown retry step: \(label)") }
         try await record(label: label, state: .pending, message: "retry requested")
+    }
+
+    public func reserveChild(label: String, runId: String) throws {
+        guard state.steps[label] != nil else { throw RecipeError.failed("Unknown child label") }
+        guard state.childRunIds?[label] == nil else { throw RecipeError.failed("Child run is already reserved") }
+        if state.childRunIds == nil { state.childRunIds = [:] }
+        state.childRunIds?[label] = runId
+        try save()
+    }
+
+    func invalidateSteps(_ labels: Set<String>) throws {
+        for label in labels {
+            guard var step = state.steps[label] else { throw RecipeError.failed("Unknown retry dependent: \(label)") }
+            step.state = .pending
+            step.updatedAt = Self.isoNow()
+            step.lastMessage = "upstream step retry requested"
+            state.steps[label] = step
+        }
+        state.updatedAt = Self.isoNow()
+        try save()
     }
 
     public func save() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try encoder.encode(state).write(to: url)
+        try encoder.encode(state).write(to: url, options: .atomic)
     }
 
     private static func isoNow() -> String {

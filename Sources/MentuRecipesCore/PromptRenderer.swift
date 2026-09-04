@@ -21,7 +21,7 @@ public struct PromptRenderer: Sendable {
 
     public static func render(_ text: String, vars: [String: String]) -> String {
         var rendered = text
-        for (key, value) in vars.sorted(by: { $0.key.count > $1.key.count }) {
+        for (key, value) in vars.sorted(by: { $0.key.count == $1.key.count ? $0.key < $1.key : $0.key.count > $1.key.count }) {
             rendered = rendered.replacingOccurrences(of: "${\(key)}", with: value)
             rendered = rendered.replacingOccurrences(of: "$\(key)", with: value)
         }
