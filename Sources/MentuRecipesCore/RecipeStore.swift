@@ -97,6 +97,11 @@ public struct RecipeStore: Sendable {
 
     public func topologicalOrder(_ nodes: [RecipeNode]) throws -> [RecipeNode] {
         let pairs = nodes.map { (($0.label ?? $0.recipe), $0) }
+        var labels = Set<String>()
+        for (label, _) in pairs {
+            guard Self.isSafeStepLabel(label) else { throw RecipeError.invalidRecipe("Unsafe recipe node label: \(label)") }
+            guard labels.insert(label).inserted else { throw RecipeError.duplicateStep(label) }
+        }
         let byLabel = Dictionary(uniqueKeysWithValues: pairs)
         var temporary = Set<String>()
         var permanent = Set<String>()

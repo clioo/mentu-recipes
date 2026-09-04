@@ -246,6 +246,8 @@ public struct RunOptions: Sendable {
     public let cloudBaseURL: URL
     public let quiet: Bool
     public let maxParallel: Int?
+    public let planDigest: String?
+    public let requestKey: String?
 
     public init(
         workspace: URL,
@@ -256,7 +258,9 @@ public struct RunOptions: Sendable {
         cloudEnabled: Bool = false,
         cloudBaseURL: URL = URL(string: "https://api.mentu.ai")!,
         quiet: Bool = false,
-        maxParallel: Int? = nil
+        maxParallel: Int? = nil,
+        planDigest: String? = nil,
+        requestKey: String? = nil
     ) {
         self.workspace = workspace
         self.home = home
@@ -267,6 +271,8 @@ public struct RunOptions: Sendable {
         self.cloudBaseURL = cloudBaseURL
         self.quiet = quiet
         self.maxParallel = maxParallel
+        self.planDigest = planDigest
+        self.requestKey = requestKey
     }
 }
 

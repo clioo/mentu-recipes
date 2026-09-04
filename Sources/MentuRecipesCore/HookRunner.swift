@@ -25,7 +25,8 @@ enum HookRunner {
         workspace: URL,
         status: String,
         extraEnv: [String: String] = [:],
-        quiet: Bool
+        quiet: Bool,
+        environment: [String: String]? = nil
     ) async -> [HookRunRecord] {
         guard let commands, !commands.isEmpty else { return [] }
         var records: [HookRunRecord] = []
@@ -33,7 +34,7 @@ enum HookRunner {
             let prefix = "hook-\(event)-\(step?.label ?? "run")-\(index + 1)"
             let stdoutFile = "\(prefix).stdout"
             let stderrFile = "\(prefix).stderr"
-            var env = ProcessInfo.processInfo.environment
+            var env = environment ?? ProcessInfo.processInfo.environment
             env["MENTU_RECIPES_HOOK_EVENT"] = event
             env["MENTU_RECIPES_RUN_ID"] = runId
             env["MENTU_RECIPES_RECIPE"] = recipe.name

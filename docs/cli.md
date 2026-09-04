@@ -50,6 +50,17 @@ mentu-recipes check <recipe-or-path>
 
 Loads and validates a recipe.
 
+## `plan`
+
+```sh
+mentu-recipes plan <recipe-or-path> [options]
+```
+
+Returns a JSON review digest for resolved execution inputs without running hooks,
+tools, or models. Use the same workspace, backend, model, variables, parallel
+limit, and cloud options when executing. See [Admitted Execution](admitted-execution.md)
+for the guarantees, recovery behavior, and limitations.
+
 ## `run`
 
 ```sh
@@ -67,6 +78,8 @@ Options:
 | `--max-parallel N` | Limit parallel step or child-recipe execution. |
 | `--var KEY=VALUE` | Add a prompt and env variable. Can be repeated. |
 | `--quiet` | Reduce step streaming output. |
+| `--plan-digest SHA256` | Opt into content-bound execution admission; requires a request key. |
+| `--request-key KEY` | Deduplicate one operation; requires an approved plan digest. |
 
 ## `resume`
 
@@ -78,6 +91,9 @@ Loads `.mentu/runs/<run-id>/state.json`, skips steps already marked
 `success` or `warn_bookkeeping`, and reruns incomplete branches. Resume appends
 new events to the existing `events.jsonl`.
 
+Admitted runs require `--plan-digest`, a new `--request-key` for the recovery
+intent, and the original plan options including `--var` substitutions.
+
 ## `retry-step`
 
 ```sh
@@ -86,6 +102,9 @@ mentu-recipes retry-step <run-id> <step-label> [--workspace PATH]
 
 Marks one step as pending and resumes the run. Completed dependencies remain
 complete.
+
+In admitted mode, dependent step evidence is invalidated and rechecked. The
+original digest and plan options are required, as for `resume`.
 
 ## `report`
 
