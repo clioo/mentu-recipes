@@ -258,6 +258,8 @@ public struct RunOptions: Sendable {
     public let quiet: Bool
     public let maxParallel: Int?
     public let inferenceBudget: InferenceBudgetContext?
+    public let planDigest: String?
+    public let requestKey: String?
 
     public init(
         workspace: URL,
@@ -269,7 +271,9 @@ public struct RunOptions: Sendable {
         cloudBaseURL: URL = URL(string: "https://api.mentu.ai")!,
         quiet: Bool = false,
         maxParallel: Int? = nil,
-        inferenceBudget: InferenceBudgetContext? = nil
+        inferenceBudget: InferenceBudgetContext? = nil,
+        planDigest: String? = nil,
+        requestKey: String? = nil
     ) {
         self.workspace = workspace
         self.home = home
@@ -281,6 +285,8 @@ public struct RunOptions: Sendable {
         self.quiet = quiet
         self.maxParallel = maxParallel
         self.inferenceBudget = inferenceBudget
+        self.planDigest = planDigest
+        self.requestKey = requestKey
     }
 }
 

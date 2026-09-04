@@ -28,6 +28,7 @@ this public repo.
 ## Operations
 
 - [CLI Reference](cli.md)
+- [Admitted Execution](admitted-execution.md)
 - [Cloud Hooks](cloud-hooks.md)
 - [Run Records](run-records.md)
 - [Runtime Intelligence](runtime-intelligence.md)

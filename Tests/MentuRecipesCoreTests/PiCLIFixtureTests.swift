@@ -136,6 +136,41 @@ final class PiCLIFixtureTests: XCTestCase {
         XCTAssertTrue(result.providerCompleted)
     }
 
+    func testAdmittedPiChildrenKeepIdentityAndBudgetOnRecovery() async throws {
+        let (root, _, config) = try await fixture(mode: "read")
+        let recipeDir = root.appendingPathComponent(".mentu/recipes")
+        try FileManager.default.createDirectory(at: recipeDir, withIntermediateDirectories: true)
+        let child: [String: Any] = ["name": "child", "env": ["PI_FIXTURE_KEY": "local-fixture"],
+            "providers": ["fixture": try JSONSerialization.jsonObject(with: JSONEncoder().encode(config))],
+            "steps": [["label": "read", "backend": "fixture", "model": "fixture-model",
+                       "prompt": "Read fixture.txt and confirm its contents.", "allowed_tools": ["read"], "timeout": 20]]]
+        let parent: [String: Any] = ["name": "parent", "type": "pipeline", "steps": [],
+            "inference_budget": ["max_requests": 2, "max_concurrent_requests": 1, "max_request_bytes": 32768,
+                "max_total_input_bytes": 65536, "max_output_tokens": 128, "max_duration_seconds": 30],
+            "recipes": [["label": "one", "recipe": "child"], ["label": "two", "recipe": "child"]]]
+        try JSONSerialization.data(withJSONObject: child).write(to: recipeDir.appendingPathComponent("child.json"))
+        try JSONSerialization.data(withJSONObject: parent).write(to: recipeDir.appendingPathComponent("parent.json"))
+        let digest = try ExecutionPlan.resolve("parent", options: RunOptions(workspace: root, home: root)).digest
+        let runner = RecipeRunner(options: RunOptions(workspace: root, home: root, quiet: true,
+            planDigest: digest, requestKey: "first-click"))
+        let first = try await runner.run("parent")
+        XCTAssertEqual(first.outcome, "failed")
+        let state = try RunStateStore.load(runDir: root.appendingPathComponent(".mentu/runs/\(first.runId)"))
+        let originalChildren = await state.snapshot().childRunIds
+        XCTAssertEqual(originalChildren?.count, 2)
+        let repeated = try await runner.run("parent")
+        XCTAssertEqual(repeated.runId, first.runId)
+        let recovered = try await RecipeRunner(options: RunOptions(workspace: root, home: root, quiet: true,
+            planDigest: digest, requestKey: "recover-click")).resume(runId: first.runId)
+        XCTAssertEqual(recovered.outcome, "failed")
+        XCTAssertEqual(recovered.inferenceBudget, first.inferenceBudget)
+        let updated = try RunStateStore.load(runDir: root.appendingPathComponent(".mentu/runs/\(first.runId)"))
+        let updatedChildren = await updated.snapshot().childRunIds
+        XCTAssertEqual(updatedChildren, originalChildren)
+        let requests = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("requests.json"))) as? [[String: Any]]
+        XCTAssertEqual(requests?.count, 2)
+    }
+
     func testChildRecipesAndResumeShareOriginalRequestBudget() async throws {
         let (root, _, config) = try await fixture(mode: "read")
         let recipeDir = root.appendingPathComponent(".mentu/recipes")

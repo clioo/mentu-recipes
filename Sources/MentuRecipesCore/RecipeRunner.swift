@@ -21,6 +21,7 @@ public struct StepRunRecord: Codable, Sendable {
     public let drift: WorkspaceDrift?
     public let warnings: [String]?
     public let hooks: [HookRunRecord]?
+    public let executionUnverifiable: Bool?
 
     public init(
         label: String,
@@ -42,7 +43,8 @@ public struct StepRunRecord: Codable, Sendable {
         verification: VerificationOutcome? = nil,
         drift: WorkspaceDrift? = nil,
         warnings: [String]? = nil,
-        hooks: [HookRunRecord]?
+        hooks: [HookRunRecord]?,
+        executionUnverifiable: Bool? = nil
     ) {
         self.label = label
         self.backend = backend
@@ -64,6 +66,7 @@ public struct StepRunRecord: Codable, Sendable {
         self.drift = drift
         self.warnings = warnings
         self.hooks = hooks
+        self.executionUnverifiable = executionUnverifiable
     }
 
     enum CodingKeys: String, CodingKey {
@@ -81,6 +84,7 @@ public struct StepRunRecord: Codable, Sendable {
         case outputFile = "output_file"
         case errorFile = "error_file"
         case git, verification, drift, warnings, hooks
+        case executionUnverifiable = "execution_unverifiable"
     }
 }
 
@@ -153,22 +157,50 @@ public final class RecipeRunner {
     private let store: RecipeStore
     private let renderer: PromptRenderer
     private let progress: RunProgress
+    private let captured: CapturedRecipe?
+    private let parentRunId: String?
 
-    public init(options: RunOptions) {
+    public convenience init(options: RunOptions) {
+        self.init(options: options, captured: nil, parentRunId: nil)
+    }
+
+    init(options: RunOptions, captured: CapturedRecipe?, parentRunId: String?) {
         self.options = options
         self.paths = RecipePaths(workspace: options.workspace, home: options.home)
         self.store = RecipeStore(paths: paths)
         self.renderer = PromptRenderer(paths: paths)
         self.progress = RunProgress(quiet: options.quiet)
+        self.captured = captured
+        self.parentRunId = parentRunId
     }
 
     public func run(_ nameOrPath: String) async throws -> RecipeRunRecord {
-        let (recipe, recipeURL) = try store.load(nameOrPath)
-        let runId = "run_\(Self.timestampForID())_\(UUID().uuidString.prefix(8))"
-        let runDir = paths.projectRuns.appendingPathComponent(runId)
-        try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
+        if options.planDigest != nil || options.requestKey != nil {
+            return try await AdmittedExecution.execute(nameOrPath, options: options)
+        }
+        return try await start(nameOrPath)
+    }
 
-        let baseEnv = mergedEnvironment(recipeEnv: recipe.env, stepEnv: nil, vars: options.vars)
+    func runCaptured(runId: String) async throws -> RecipeRunRecord {
+        guard let captured else { throw AdmissionError.invalidRequest }
+        return try await start(captured.source.path, assignedRunId: runId)
+    }
+
+    private func start(_ nameOrPath: String, assignedRunId: String? = nil) async throws -> RecipeRunRecord {
+        let (recipe, recipeURL) = try captured.map { ($0.recipe, $0.source) } ?? store.load(nameOrPath)
+        let runId = assignedRunId ?? "run_\(Self.timestampForID())_\(UUID().uuidString.prefix(8))"
+        let runDir = paths.projectRuns.appendingPathComponent(runId)
+        guard !FileManager.default.fileExists(atPath: runDir.path) else {
+            throw RecipeError.failed("Run directory already exists; refusing to overwrite execution evidence")
+        }
+        try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
+        if let captured {
+            try WorkspaceAdmissionLease.write(RunAdmission(version: 1, digest: captured.review.digest, parentRunId: parentRunId),
+                                              at: runDir.appendingPathComponent("admission.json"))
+            try WorkspaceAdmissionLease.write(captured.review, at: runDir.appendingPathComponent("plan.json"))
+        }
+
+        let baseEnv = captured?.environment ?? mergedEnvironment(recipeEnv: recipe.env, stepEnv: nil, vars: options.vars)
         let cloudRequested = options.cloudEnabled || recipe.cloud?.enabled == true
         let cloud = cloudRequested
             ? MentuCloudClient.configured(baseURL: options.cloudBaseURL, env: baseEnv)
@@ -215,7 +247,8 @@ public final class RecipeRunner {
             runDir: runDir,
             workspace: options.workspace,
             status: "running",
-            quiet: options.quiet
+            quiet: options.quiet,
+            environment: captured?.environment
         )
         await writer.emit(.hookFinished, status: "ok", data: ["event": "before_run"])
 
@@ -242,7 +275,8 @@ public final class RecipeRunner {
             runDir: runDir,
             workspace: options.workspace,
             status: record.outcome,
-            quiet: options.quiet
+            quiet: options.quiet,
+            environment: captured?.environment
         )
         if let cloudRunId = record.cloudRunId, let cloud {
             _ = try? await cloud.endRun(runId: cloudRunId, outcome: record.outcome)
@@ -253,13 +287,27 @@ public final class RecipeRunner {
     }
 
     public func resume(runId: String, retryStep: String? = nil) async throws -> RecipeRunRecord {
+        try AdmittedExecution.validateRunID(runId)
+        if captured == nil, options.planDigest != nil || options.requestKey != nil {
+            return try await AdmittedExecution.execute(nil, runId: runId, retryStep: retryStep, options: options)
+        }
         let runDir = paths.projectRuns.appendingPathComponent(runId)
+        let admissionURL = runDir.appendingPathComponent("admission.json")
+        if FileManager.default.fileExists(atPath: admissionURL.path) {
+            guard let captured else { throw AdmissionError.invalidRequest }
+            let admission = try WorkspaceAdmissionLease.read(RunAdmission.self, at: admissionURL)
+            guard admission.version == 1, admission.digest == captured.review.digest else { throw AdmissionError.planChanged }
+        }
         let state = try RunStateStore.load(runDir: runDir)
         let snapshot = await state.snapshot()
-        let (recipe, _) = try store.load(snapshot.recipeRef)
+        let (recipe, _) = try captured.map { ($0.recipe, $0.source) } ?? store.load(snapshot.recipeRef)
         var record = try RunReporter.load(runId: runId, workspace: options.workspace)
         let execution = try budgetedRunner(recipe: recipe, record: &record, runDir: runDir, recovering: true)
         if let retryStep {
+            guard runnableLabels(recipe).contains(retryStep) else { throw RecipeError.failed("Unknown retry step: \(retryStep)") }
+            if captured != nil, !recipe.steps.isEmpty {
+                try await state.invalidateSteps(try retryDependents(of: retryStep, recipe: recipe))
+            }
             try await state.markRetryTarget(retryStep)
         }
         record.outcome = "running"
@@ -272,7 +320,7 @@ public final class RecipeRunner {
             startingSequence: RunEventWriter.lastSequence(in: eventsURL)
         )
         await writer.emit(.runResumed, status: "running", data: retryStep.map { ["retry_step": $0] })
-        let env = mergedEnvironment(recipeEnv: recipe.env, stepEnv: nil, vars: snapshot.vars)
+        let env = captured?.environment ?? mergedEnvironment(recipeEnv: recipe.env, stepEnv: nil, vars: snapshot.vars)
         let cloudRequested = options.cloudEnabled || recipe.cloud?.enabled == true
         let cloud = cloudRequested ? MentuCloudClient.configured(baseURL: options.cloudBaseURL, env: env) : nil
         let ok = try await execution.runBody(recipe, runDir: runDir, cloud: cloud, record: &record, events: writer, state: state, retryStep: retryStep, vars: snapshot.vars)
@@ -443,7 +491,11 @@ public final class RecipeRunner {
         } catch {
             let message = cleanErrorMessage(String(describing: error))
             progress.stepFailed(index: index, total: total, label: step.label, message: message)
-            let failed = failedRecord(step, recipe: recipe, message: message)
+            let attempts = await state.snapshot().steps[step.label]?.attempts ?? 0
+            let failed = failedRecord(step, recipe: recipe, message: message, attempts: attempts)
+            if attempts > 0 {
+                try? (message + "\n").write(to: runDir.appendingPathComponent("\(step.label).attempt-\(attempts).failure.txt"), atomically: true, encoding: .utf8)
+            }
             try? await state.record(label: step.label, state: .failed, message: message)
             await events.emit(.error, stepLabel: step.label, status: "failed", message: message)
             try? "".write(to: runDir.appendingPathComponent(failed.outputFile), atomically: true, encoding: .utf8)
@@ -457,7 +509,8 @@ public final class RecipeRunner {
                 runDir: runDir,
                 workspace: options.workspace,
                 status: "failed",
-                quiet: options.quiet
+                quiet: options.quiet,
+                environment: captured?.environment
             )
             return failed
         }
@@ -473,7 +526,7 @@ public final class RecipeRunner {
         return text
     }
 
-    private func failedRecord(_ step: RecipeStep, recipe: RecipeDefinition, message: String, outcome: String = StepExecutionState.failed.rawValue) -> StepRunRecord {
+    private func failedRecord(_ step: RecipeStep, recipe: RecipeDefinition, message: String, outcome: String = StepExecutionState.failed.rawValue, attempts: Int = 0) -> StepRunRecord {
         StepRunRecord(
             label: step.label,
             backend: step.backend ?? options.backend ?? recipe.backend ?? "unresolved",
@@ -485,7 +538,7 @@ public final class RecipeRunner {
             cloudComplete: nil,
             trustScore: nil,
             durationSeconds: 0,
-            attempts: 0,
+            attempts: attempts,
             inputTokens: nil,
             outputTokens: nil,
             outputFile: "\(step.label).stdout",
@@ -646,9 +699,23 @@ public final class RecipeRunner {
             quiet: options.quiet,
             maxParallel: options.maxParallel,
             inferenceBudget: options.inferenceBudget
-        ))
+        ), captured: captured?.children[label], parentRunId: captured == nil ? nil : runDir.lastPathComponent)
         do {
-            let childRecord = try await child.run(node.recipe)
+            let childRecord: RecipeRunRecord
+            if captured != nil {
+                if let childId = await state.snapshot().childRunIds?[label] {
+                    try AdmittedExecution.validateRunID(childId)
+                    let previous = try RunReporter.load(runId: childId, workspace: options.workspace)
+                    guard previous.outcome != "running" else { throw AdmissionError.unverifiable(childId) }
+                    childRecord = previous.outcome == "ok" ? previous : try await child.resume(runId: childId)
+                } else {
+                    let childId = "run_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+                    try await state.reserveChild(label: label, runId: childId)
+                    childRecord = try await child.runCaptured(runId: childId)
+                }
+            } else {
+                childRecord = try await child.run(node.recipe)
+            }
             let outputFile = "\(label).child-run.txt"
             try? childRecord.runId.write(to: runDir.appendingPathComponent(outputFile), atomically: true, encoding: .utf8)
             let childState: StepExecutionState = childRecord.outcome == "ok" ? .success : .failed
@@ -668,13 +735,14 @@ public final class RecipeRunner {
                 cloudComplete: nil,
                 trustScore: nil,
                 durationSeconds: Int(Date().timeIntervalSince(start)),
-                attempts: 1,
+                attempts: await state.snapshot().steps[label]?.attempts ?? 1,
                 inputTokens: nil,
                 outputTokens: nil,
                 outputFile: outputFile,
                 errorFile: "\(label).child-run.err",
                 git: nil,
-                hooks: nil
+                hooks: nil,
+                executionUnverifiable: childRecord.steps.contains(where: { $0.exitCode == 124 || $0.executionUnverifiable == true }) ? true : nil
             )
         } catch {
             let errorFile = "\(label).child-run.err"
@@ -695,13 +763,14 @@ public final class RecipeRunner {
                 cloudComplete: nil,
                 trustScore: nil,
                 durationSeconds: Int(Date().timeIntervalSince(start)),
-                attempts: 1,
+                attempts: await state.snapshot().steps[label]?.attempts ?? 1,
                 inputTokens: nil,
                 outputTokens: nil,
                 outputFile: "\(label).child-run.txt",
                 errorFile: errorFile,
                 git: nil,
-                hooks: nil
+                hooks: nil,
+                executionUnverifiable: captured == nil ? nil : true
             )
         }
     }
@@ -719,7 +788,8 @@ public final class RecipeRunner {
         vars: [String: String]
     ) async throws -> StepRunRecord {
         let backendName = step.backend ?? options.backend ?? recipe.backend
-        let env = mergedEnvironment(recipeEnv: recipe.env, stepEnv: step.env, vars: vars)
+        let frozenStep = captured?.steps[step.label]
+        let env = frozenStep?.environment ?? mergedEnvironment(recipeEnv: recipe.env, stepEnv: step.env, vars: vars)
         let adapter: BackendAdapter
         if let backendName {
             guard let resolved = AdapterRegistry.adapter(named: backendName, providers: recipe.providers ?? [:]) else {
@@ -740,17 +810,21 @@ public final class RecipeRunner {
         }
 
         let promptVars = env.merging(vars) { _, new in new }
-        let prompt = try renderer.prompt(for: step, vars: promptVars)
-        let stepDir = try resolveStepDirectory(step.dir)
+        let prompt = try frozenStep?.prompt ?? renderer.prompt(for: step, vars: promptVars)
+        let stepDir = try frozenStep?.directory ?? resolveStepDirectory(step.dir)
+        if frozenStep != nil, try ExecutionDirectory.resolve(step.dir, workspace: options.workspace) != stepDir {
+            throw AdmissionError.planChanged
+        }
         let timeout = step.timeout ?? 1800
         let maxOutputBytes = step.maxOutputBytes ?? 5_000_000
         let attemptsAllowed = max(0, step.maxRetries ?? 0) + 1
-        let model = step.model ?? options.model ?? recipe.model
+        let model = captured?.review.steps.first(where: { $0.label == step.label })?.model ?? step.model ?? options.model ?? recipe.model
 
         var lastResult: AdapterResult?
         var lastLocalComplete = false
         let start = Date()
-        var attempts = 0
+        let previousAttempts = await state.snapshot().steps[step.label]?.attempts ?? 0
+        var attempts = previousAttempts
         var hookRecords: [HookRunRecord] = []
         let preStepBaseline = await WorkspaceBaselineManager.capture(from: stepDir)
         try? await state.record(label: step.label, state: .running, message: nil)
@@ -764,12 +838,13 @@ public final class RecipeRunner {
             runDir: runDir,
             workspace: stepDir,
             status: "running",
-            quiet: options.quiet
+            quiet: options.quiet,
+            environment: captured?.environment
         )
         await events.emit(.hookFinished, stepLabel: step.label, status: "ok", data: ["event": "before_step"])
 
         for attempt in 1...attemptsAllowed {
-            attempts = attempt
+            attempts = previousAttempts + attempt
             if attempt > 1 {
                 try? await state.record(label: step.label, state: .running, message: "retry \(attempt)", incrementAttempts: true)
                 await events.emit(.stepRetried, stepLabel: step.label, backend: adapter.name, status: "retrying", data: ["attempt": String(attempt)])
@@ -800,6 +875,9 @@ public final class RecipeRunner {
                 }
             )
             lastResult = result
+            let attemptPrefix = "\(step.label).attempt-\(attempts)"
+            try result.stdout.write(to: runDir.appendingPathComponent("\(attemptPrefix).stdout"), atomically: true, encoding: .utf8)
+            try result.stderr.write(to: runDir.appendingPathComponent("\(attemptPrefix).stderr"), atomically: true, encoding: .utf8)
             lastLocalComplete = localComplete(step: step, adapter: adapter, result: result)
             if lastLocalComplete {
                 await events.emit(.verificationStarted, stepLabel: step.label, status: "running")
@@ -857,7 +935,7 @@ public final class RecipeRunner {
         var verificationOutcome: VerificationOutcome?
         let processLocalComplete = lastLocalComplete
         if lastLocalComplete {
-            verificationOutcome = try await Verification.evaluate(step.verify, stepDir: stepDir, preStepBaseline: preStepBaseline)
+            verificationOutcome = try await Verification.evaluate(step.verify, stepDir: stepDir, preStepBaseline: preStepBaseline, environment: captured?.environment)
             await events.emit(
                 .verificationFinished,
                 stepLabel: step.label,
@@ -931,7 +1009,8 @@ public final class RecipeRunner {
                 "MENTU_RECIPES_STEP_STDOUT": runDir.appendingPathComponent(stdoutFile).path,
                 "MENTU_RECIPES_STEP_STDERR": runDir.appendingPathComponent(stderrFile).path
             ],
-            quiet: options.quiet
+            quiet: options.quiet,
+            environment: captured?.environment
         )
         await events.emit(.hookFinished, stepLabel: step.label, status: lastLocalComplete ? "ok" : "failed", data: ["event": lastLocalComplete ? "after_step" : "on_error"])
         await events.emit(.stepFinished, stepLabel: step.label, backend: adapter.name, status: stepState.rawValue)
@@ -1041,13 +1120,27 @@ public final class RecipeRunner {
         return RecipeRunner(options: RunOptions(workspace: options.workspace, home: options.home,
             backend: options.backend, model: options.model, vars: options.vars,
             cloudEnabled: false, cloudBaseURL: options.cloudBaseURL, quiet: options.quiet,
-            maxParallel: options.maxParallel, inferenceBudget: context))
+            maxParallel: options.maxParallel, inferenceBudget: context,
+            planDigest: options.planDigest, requestKey: options.requestKey),
+            captured: captured, parentRunId: parentRunId)
+    }
+
+    private func retryDependents(of target: String, recipe: RecipeDefinition) throws -> Set<String> {
+        let ordered = try store.topologicalOrder(recipe.steps)
+        if !ordered.contains(where: { !($0.dependsOn ?? []).isEmpty }) {
+            return Set(ordered.drop(while: { $0.label != target }).map(\.label))
+        }
+        var affected: Set<String> = [target]
+        for step in ordered where (step.dependsOn ?? []).contains(where: affected.contains) {
+            affected.insert(step.label)
+        }
+        return affected
     }
 
     private func write<T: Encodable>(_ value: T, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(value).write(to: url)
+        try encoder.encode(value).write(to: url, options: .atomic)
     }
 
     private static func isoNow() -> String {
