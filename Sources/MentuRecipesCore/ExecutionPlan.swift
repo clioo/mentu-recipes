@@ -10,6 +10,9 @@ public struct ExecutionPlan: Codable, Sendable {
     public let workspace: String
     public let steps: [Step]
     public let children: [ExecutionPlan]
+    /// Environment variable names the digest deliberately does not bind. They
+    /// change between terminal sessions without changing what a step does.
+    public let unboundEnvironment: [String]
 
     public struct Step: Codable, Sendable {
         public let label: String
@@ -67,11 +70,23 @@ final class ExecutionPlanResolver {
     private var bytesRead = 0
     private var nodesRead = 0
 
+    /// Session-scoped variables every macOS terminal, SSH session or login sets
+    /// differently, none of which change what a step does. Binding them made a
+    /// plan taken in one terminal tab fail in the next. Everything else in the
+    /// environment is bound, because the step will read it.
+    static let sessionScopedEnvironment: Set<String> = [
+        "_", "SHLVL", "OLDPWD", "PWD", "TMPDIR",
+        "TERM_SESSION_ID", "ITERM_SESSION_ID", "ITERM_PROFILE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
+        "LC_TERMINAL", "LC_TERMINAL_VERSION", "COLORTERM", "WINDOWID", "COLUMNS", "LINES",
+        "SECURITYSESSIONID", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING", "__CFBundleIdentifier",
+        "SSH_AUTH_SOCK", "SSH_AGENT_PID", "SSH_TTY", "SSH_CONNECTION", "SSH_CLIENT",
+        "Apple_PubSub_Socket_Render", "DISPLAY",
+    ]
+
     init(options: RunOptions, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.options = options
         paths = RecipePaths(workspace: options.workspace, home: options.home)
-        // These shell bookkeeping values change between plan and run invocations.
-        ambient = environment.filter { !["_", "SHLVL"].contains($0.key) }
+        ambient = environment.filter { !Self.sessionScopedEnvironment.contains($0.key) }
     }
 
     func capture(_ reference: String) throws -> CapturedRecipe {
@@ -156,7 +171,8 @@ final class ExecutionPlanResolver {
             "cloud": String(options.cloudEnabled), "cloud_url": options.cloudBaseURL.absoluteString
         ])
         let review = ExecutionPlan(version: 1, digest: digest, recipe: recipe.name, source: source.path,
-                                   workspace: workspace, steps: summaries, children: childPlans)
+                                   workspace: workspace, steps: summaries, children: childPlans,
+                                   unboundEnvironment: Self.sessionScopedEnvironment.sorted())
         return CapturedRecipe(recipe: recipe, source: source, environment: environment,
                               steps: steps, children: children, review: review)
     }

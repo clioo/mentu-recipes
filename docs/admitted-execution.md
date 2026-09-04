@@ -38,6 +38,26 @@ and model per step, step digests, and child plans. It does not contain prompt
 bodies or environment values. It contains local paths and model names, so it
 is a local review artifact, not automatically safe to publish.
 
+### What the digest binds, and what it leaves out
+
+The digest covers the recipe file bytes, every resolved prompt, the step and
+recipe `env` blocks, the variables, the working directories, the backend and
+model per step, and the environment the step will run in. It leaves out a fixed
+set of session-scoped variables that every terminal tab, SSH session and login
+sets differently and that never change what a step does. The plan lists them
+under `unbound_environment`; the current set is `_`, `SHLVL`, `OLDPWD`, `PWD`,
+`TMPDIR`, the `TERM_*`, `ITERM_*`, `LC_TERMINAL*` and `SSH_*` families,
+`COLORTERM`, `WINDOWID`, `COLUMNS`, `LINES`, `SECURITYSESSIONID`, the `XPC_*`
+and `__CF*` values, `Apple_PubSub_Socket_Render` and `DISPLAY`. Any other
+environment difference between `plan` and `run` invalidates the plan, on
+purpose.
+
+`plan` also resolves credentials. It reads the vault for the keys the selected
+backends use and binds the resolved values into the digest, so rotating a
+provider key invalidates every plan taken before it. Nothing is written but the
+hash. This means `plan` can touch the login Keychain and is not a pure
+inspection command.
+
 ## Concurrency and idempotency
 
 The macOS runner uses an advisory, nonblocking file lock scoped to the canonical
@@ -89,6 +109,26 @@ Attempt counters remain cumulative across recovery. Per-attempt stdout/stderr
 files preserve previous process output; compatibility stdout/stderr files still
 point to the latest attempt. Provider exceptions get a separate attempt failure
 file. Run and state JSON writes are atomic.
+
+### When a run was interrupted
+
+A `kill -9`, a crash or a reboot in the middle of an admitted run leaves
+`.mentu/runs/.admission/active.json` in place. Every later admitted operation in
+that workspace then fails with `Interrupted execution is unverifiable`, because
+the runner cannot know whether the tools that run started have stopped. Legacy
+runs keep working. There is deliberately no force flag and no timed takeover.
+
+The operator's path is manual: read `active.json` to see which run it names,
+confirm nothing from that run is still running, read that run's record if it
+matters, then remove the file:
+
+```sh
+cat .mentu/runs/.admission/active.json
+rm .mentu/runs/.admission/active.json
+```
+
+The receipts next to it stay; they are what makes a repeated request key return
+the same run.
 
 ## Limits and compatibility
 

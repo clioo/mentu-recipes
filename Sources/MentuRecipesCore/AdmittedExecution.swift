@@ -15,7 +15,10 @@ public enum AdmissionError: Error, CustomStringConvertible {
         case .planChanged: return "Execution plan changed; review the current plan before starting or recovering"
         case .requestConflict: return "Request key was already used for a different plan or operation"
         case .busy(let run): return "Workspace has an admitted execution in progress: \(run ?? "reservation pending")"
-        case .unverifiable(let run): return "Interrupted execution is unverifiable; refusing automatic takeover: \(run)"
+        case .unverifiable(let run): return """
+            Interrupted execution is unverifiable; refusing automatic takeover: \(run)
+            Confirm nothing from that run is still running, then remove .mentu/runs/.admission/active.json to allow admitted work again.
+            """
         case .legacyRecovery: return "This run has no admitted plan; recover it using the legacy workflow"
         }
     }
@@ -149,7 +152,8 @@ enum AdmittedExecution {
             record = try await runner.runCaptured(runId: target)
         }
         if record.outcome != "running", !record.steps.contains(where: { $0.exitCode == 124 || $0.executionUnverifiable == true }) {
-            try FileManager.default.removeItem(at: activeURL)
+            // A failed cleanup must not turn a finished run into an error.
+            try? FileManager.default.removeItem(at: activeURL)
         }
         return record
     }

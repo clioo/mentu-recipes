@@ -57,7 +57,8 @@ mentu-recipes plan <recipe-or-path> [options]
 ```
 
 Returns a JSON review digest for resolved execution inputs without running hooks,
-tools, or models. Use the same workspace, backend, model, variables, parallel
+tools, or models. It does resolve credentials from the vault for the selected
+backends, so it can touch the login Keychain. Use the same workspace, backend, model, variables, parallel
 limit, and cloud options when executing. See [Admitted Execution](admitted-execution.md)
 for the guarantees, recovery behavior, and limitations.
 
