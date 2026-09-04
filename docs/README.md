@@ -20,6 +20,7 @@ this public repo.
 - [Recipe Schema](recipe-schema.md)
 - [Prompts And Variables](prompts-and-variables.md)
 - [Providers](providers.md)
+- [Pi And Inference Budgets](pi-backend.md)
 - [Credentials And Vault](credentials-and-vault.md)
 - [Shell Steps](shell-steps.md)
 - [Deterministic Verification](verification.md)

@@ -16,6 +16,7 @@ A recipe is a JSON object with a name and a list of steps.
 | `cloud` | object | no | Optional cloud behavior. |
 | `hooks` | object | no | Optional shell hooks around runs and steps. |
 | `max_parallel` | integer | no | Max parallelism for wave or child-recipe execution. |
+| `inference_budget` | object | no | Shared request, concurrency, input-byte, output-token and duration limits for Pi. See [bounded Pi](pi-backend.md). |
 | `steps` | array | for `sequence` and `formula` | Ordered or dependency-linked steps. |
 | `recipes` | array | for `compound`, `pipeline`, and `parallel` | Child recipe nodes. |
 

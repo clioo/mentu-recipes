@@ -98,6 +98,7 @@ public struct RecipeRunRecord: Codable, Sendable {
     public var eventsFile: String?
     public var stateFile: String?
     public var baselineFile: String?
+    public var inferenceBudget: InferenceBudgetContext?
 
     public init(
         runId: String,
@@ -141,6 +142,7 @@ public struct RecipeRunRecord: Codable, Sendable {
         case eventsFile = "events_file"
         case stateFile = "state_file"
         case baselineFile = "baseline_file"
+        case inferenceBudget = "inference_budget"
         case steps, hooks
     }
 }
@@ -187,6 +189,7 @@ public final class RecipeRunner {
             stateFile: "state.json",
             baselineFile: "baseline.json"
         )
+        let execution = try budgetedRunner(recipe: recipe, record: &record, runDir: runDir)
         try write(record, to: runDir.appendingPathComponent("run.json"))
         let writer = RunEventWriter(runId: runId, recipeName: recipe.name, runDir: runDir)
         let baseline = await WorkspaceBaselineManager.capture(from: options.workspace)
@@ -226,7 +229,7 @@ public final class RecipeRunner {
             }
         }
 
-        let overallOK = try await runBody(recipe, runDir: runDir, cloud: cloud, record: &record, events: writer, state: state, retryStep: nil, vars: options.vars)
+        let overallOK = try await execution.runBody(recipe, runDir: runDir, cloud: cloud, record: &record, events: writer, state: state, retryStep: nil, vars: options.vars)
 
         record.outcome = overallOK ? "ok" : "failed"
         record.endedAt = Self.isoNow()
@@ -253,11 +256,12 @@ public final class RecipeRunner {
         let runDir = paths.projectRuns.appendingPathComponent(runId)
         let state = try RunStateStore.load(runDir: runDir)
         let snapshot = await state.snapshot()
+        let (recipe, _) = try store.load(snapshot.recipeRef)
+        var record = try RunReporter.load(runId: runId, workspace: options.workspace)
+        let execution = try budgetedRunner(recipe: recipe, record: &record, runDir: runDir, recovering: true)
         if let retryStep {
             try await state.markRetryTarget(retryStep)
         }
-        let (recipe, _) = try store.load(snapshot.recipeRef)
-        var record = try RunReporter.load(runId: runId, workspace: options.workspace)
         record.outcome = "running"
         record.endedAt = nil
         let eventsURL = runDir.appendingPathComponent("events.jsonl")
@@ -271,7 +275,7 @@ public final class RecipeRunner {
         let env = mergedEnvironment(recipeEnv: recipe.env, stepEnv: nil, vars: snapshot.vars)
         let cloudRequested = options.cloudEnabled || recipe.cloud?.enabled == true
         let cloud = cloudRequested ? MentuCloudClient.configured(baseURL: options.cloudBaseURL, env: env) : nil
-        let ok = try await runBody(recipe, runDir: runDir, cloud: cloud, record: &record, events: writer, state: state, retryStep: retryStep, vars: snapshot.vars)
+        let ok = try await execution.runBody(recipe, runDir: runDir, cloud: cloud, record: &record, events: writer, state: state, retryStep: retryStep, vars: snapshot.vars)
         record.outcome = ok ? "ok" : "failed"
         record.endedAt = Self.isoNow()
         try write(record, to: runDir.appendingPathComponent("run.json"))
@@ -640,7 +644,8 @@ public final class RecipeRunner {
             cloudEnabled: options.cloudEnabled,
             cloudBaseURL: options.cloudBaseURL,
             quiet: options.quiet,
-            maxParallel: options.maxParallel
+            maxParallel: options.maxParallel,
+            inferenceBudget: options.inferenceBudget
         ))
         do {
             let childRecord = try await child.run(node.recipe)
@@ -727,6 +732,12 @@ public final class RecipeRunner {
             throw RecipeError.missingBackend(label: step.label)
         }
         await events.emit(.backendSelected, stepLabel: step.label, backend: adapter.name, status: "selected")
+        if options.inferenceBudget != nil, !(adapter is PiCLIAdapter), adapter.executionKind != "shell" {
+            throw RecipeError.failed("Inference budgets currently support only Pi model steps and deterministic shell steps")
+        }
+        if options.inferenceBudget != nil, (step.maxRetries ?? 0) != 0 {
+            throw RecipeError.failed("Budgeted steps cannot enable automatic runner retries")
+        }
 
         let promptVars = env.merging(vars) { _, new in new }
         let prompt = try renderer.prompt(for: step, vars: promptVars)
@@ -781,7 +792,8 @@ public final class RecipeRunner {
                     allowedTools: step.allowedTools,
                     disallowedTools: step.disallowedTools,
                     sessionName: "mentu-recipes-\(recipe.name)-\(step.label)",
-                    workingDirectory: stepDir
+                    workingDirectory: stepDir,
+                    inferenceBudget: options.inferenceBudget
                 ),
                 eventSink: { text in
                     self.progress.stream(text)
@@ -999,6 +1011,37 @@ public final class RecipeRunner {
             return recipe.steps.map(\.label)
         }
         return (recipe.recipes ?? []).map { $0.label ?? $0.recipe }
+    }
+
+    private func budgetedRunner(recipe: RecipeDefinition, record: inout RecipeRunRecord, runDir: URL, recovering: Bool = false) throws -> RecipeRunner {
+        let requested = options.inferenceBudget?.limits ?? recipe.inferenceBudget
+        if let inherited = options.inferenceBudget, let declared = recipe.inferenceBudget, inherited.limits != declared {
+            throw RecipeError.failed("Child recipe cannot replace the inherited inference budget")
+        }
+        if recovering {
+            if let saved = record.inferenceBudget {
+                if let requested, requested != saved.limits { throw RecipeError.failed("Recovery cannot change the original inference budget") }
+                if let supplied = options.inferenceBudget, supplied != saved { throw RecipeError.failed("Recovery cannot replace the inference budget context") }
+                guard FileManager.default.fileExists(atPath: saved.directory.appendingPathComponent("budget.json").path) else {
+                    throw RecipeError.failed("Recovery requires the original inference budget evidence; counters cannot be recreated")
+                }
+            } else if requested != nil {
+                throw RecipeError.failed("Recovery cannot assign fresh counters to an existing run")
+            }
+        }
+        let context = record.inferenceBudget ?? options.inferenceBudget ?? requested.map {
+            InferenceBudgetContext(limits: $0, directory: runDir.appendingPathComponent("inference"))
+        }
+        guard let context else { return self }
+        try context.limits.validate()
+        guard !options.cloudEnabled, recipe.cloud?.enabled != true, recipe.cloud?.evaluateSteps != true else {
+            throw RecipeError.failed("Budgeted runs cannot enable unmetered cloud hooks or evaluation")
+        }
+        record.inferenceBudget = context
+        return RecipeRunner(options: RunOptions(workspace: options.workspace, home: options.home,
+            backend: options.backend, model: options.model, vars: options.vars,
+            cloudEnabled: false, cloudBaseURL: options.cloudBaseURL, quiet: options.quiet,
+            maxParallel: options.maxParallel, inferenceBudget: context))
     }
 
     private func write<T: Encodable>(_ value: T, to url: URL) throws {

@@ -24,6 +24,7 @@ public struct RecipeStore: Sendable {
     }
 
     public func validate(_ recipe: RecipeDefinition) throws {
+        try recipe.inferenceBudget?.validate()
         guard !recipe.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw RecipeError.invalidRecipe("name is required")
         }

@@ -12,6 +12,7 @@ public enum StreamFormat: String, Sendable, Codable {
     case openAISSE = "openai_sse"
     case plainText = "plain_text"
     case ollamaJSON = "ollama_json"
+    case piJSON = "pi_json"
 }
 
 public enum SystemContextHandling: String, Sendable, Codable {
@@ -34,6 +35,7 @@ public struct AdapterRequest: Sendable {
     public let disallowedTools: [String]?
     public let sessionName: String?
     public let workingDirectory: URL
+    public let inferenceBudget: InferenceBudgetContext?
 
     public init(
         prompt: String,
@@ -48,7 +50,8 @@ public struct AdapterRequest: Sendable {
         allowedTools: [String]? = nil,
         disallowedTools: [String]? = nil,
         sessionName: String? = nil,
-        workingDirectory: URL
+        workingDirectory: URL,
+        inferenceBudget: InferenceBudgetContext? = nil
     ) {
         self.prompt = prompt
         self.systemContext = systemContext
@@ -63,6 +66,7 @@ public struct AdapterRequest: Sendable {
         self.disallowedTools = disallowedTools
         self.sessionName = sessionName
         self.workingDirectory = workingDirectory
+        self.inferenceBudget = inferenceBudget
     }
 }
 
@@ -185,6 +189,8 @@ public enum AdapterRegistry {
             return ClaudeCLIAdapter()
         case "codex":
             return CodexCLIAdapter()
+        case "pi":
+            return PiCLIAdapter()
         default:
             return nil
         }
@@ -209,7 +215,8 @@ public enum AdapterRegistry {
             OpenAIChatAdapter.deepSeek(),
             OpenAIChatAdapter.ollama(),
             ClaudeCLIAdapter(),
-            CodexCLIAdapter()
+            CodexCLIAdapter(),
+            PiCLIAdapter()
         ]
     }
 
@@ -239,6 +246,8 @@ public enum AdapterRegistry {
             )
         case .shell:
             return ShellAdapter()
+        case .pi:
+            return PiCLIAdapter(name: name, config: config)
         case .cli:
             if normalize(name) == "codex" {
                 return CodexCLIAdapter()

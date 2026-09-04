@@ -13,6 +13,7 @@ public struct RecipeDefinition: Codable, Sendable {
     public let maxParallel: Int?
     public let steps: [RecipeStep]
     public let recipes: [RecipeNode]?
+    public let inferenceBudget: InferenceBudget?
 
     public init(
         type: RecipeType? = nil,
@@ -26,7 +27,8 @@ public struct RecipeDefinition: Codable, Sendable {
         hooks: HookConfig? = nil,
         maxParallel: Int? = nil,
         steps: [RecipeStep] = [],
-        recipes: [RecipeNode]? = nil
+        recipes: [RecipeNode]? = nil,
+        inferenceBudget: InferenceBudget? = nil
     ) {
         self.type = type
         self.name = name
@@ -40,11 +42,13 @@ public struct RecipeDefinition: Codable, Sendable {
         self.maxParallel = maxParallel
         self.steps = steps
         self.recipes = recipes
+        self.inferenceBudget = inferenceBudget
     }
 
     enum CodingKeys: String, CodingKey {
         case type, name, description, backend, model, env, providers, cloud, hooks, steps, recipes
         case maxParallel = "max_parallel"
+        case inferenceBudget = "inference_budget"
     }
 }
 
@@ -100,6 +104,9 @@ public struct ProviderConfig: Codable, Sendable {
     public let apiKeyEnv: String?
     public let apiKeyVault: String?
     public let model: String?
+    public let maxTokensField: ChatCompletionTokenField?
+    public let contextWindow: Int?
+    public let skills: [String]?
 
     enum CodingKeys: String, CodingKey {
         case api
@@ -107,6 +114,9 @@ public struct ProviderConfig: Codable, Sendable {
         case apiKeyEnv = "api_key_env"
         case apiKeyVault = "api_key_vault"
         case model
+        case maxTokensField = "max_tokens_field"
+        case contextWindow = "context_window"
+        case skills
     }
 }
 
@@ -115,6 +125,7 @@ public enum ProviderAPI: String, Codable, Sendable {
     case chatCompletions = "chat_completions"
     case cli
     case shell
+    case pi
 }
 
 public struct RecipeStep: Codable, Sendable {
@@ -246,6 +257,7 @@ public struct RunOptions: Sendable {
     public let cloudBaseURL: URL
     public let quiet: Bool
     public let maxParallel: Int?
+    public let inferenceBudget: InferenceBudgetContext?
 
     public init(
         workspace: URL,
@@ -256,7 +268,8 @@ public struct RunOptions: Sendable {
         cloudEnabled: Bool = false,
         cloudBaseURL: URL = URL(string: "https://api.mentu.ai")!,
         quiet: Bool = false,
-        maxParallel: Int? = nil
+        maxParallel: Int? = nil,
+        inferenceBudget: InferenceBudgetContext? = nil
     ) {
         self.workspace = workspace
         self.home = home
@@ -267,6 +280,7 @@ public struct RunOptions: Sendable {
         self.cloudBaseURL = cloudBaseURL
         self.quiet = quiet
         self.maxParallel = maxParallel
+        self.inferenceBudget = inferenceBudget
     }
 }
 

@@ -161,19 +161,28 @@ public enum ProcessRunner {
     }
 
     private static func completedBeforeTimeout(_ exitTask: Task<Void, Never>, seconds: Int) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        await withCheckedContinuation { continuation in
+            let race = TimeoutContinuation(continuation)
+            let timer = DispatchWorkItem { race.resolve(false) }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .seconds(max(seconds, 0)), execute: timer)
+            Task {
                 await exitTask.value
-                return true
+                timer.cancel()
+                race.resolve(true)
             }
-            group.addTask {
-                let duration = UInt64(max(seconds, 0)) * 1_000_000_000
-                try? await Task.sleep(nanoseconds: duration)
-                return false
-            }
-            let completed = await group.next() ?? false
-            group.cancelAll()
-            return completed
+        }
+    }
+
+    private final class TimeoutContinuation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+        init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+        func resolve(_ value: Bool) {
+            lock.lock()
+            let current = continuation
+            continuation = nil
+            lock.unlock()
+            current?.resume(returning: value)
         }
     }
 
