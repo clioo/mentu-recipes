@@ -100,6 +100,9 @@ public struct ProviderConfig: Codable, Sendable {
     public let apiKeyEnv: String?
     public let apiKeyVault: String?
     public let model: String?
+    public let maxTokensField: ChatCompletionTokenField?
+    public let contextWindow: Int?
+    public let skills: [String]?
 
     enum CodingKeys: String, CodingKey {
         case api
@@ -107,6 +110,9 @@ public struct ProviderConfig: Codable, Sendable {
         case apiKeyEnv = "api_key_env"
         case apiKeyVault = "api_key_vault"
         case model
+        case maxTokensField = "max_tokens_field"
+        case contextWindow = "context_window"
+        case skills
     }
 }
 
@@ -115,6 +121,12 @@ public enum ProviderAPI: String, Codable, Sendable {
     case chatCompletions = "chat_completions"
     case cli
     case shell
+    case pi
+}
+
+public enum ChatCompletionTokenField: String, Codable, Sendable {
+    case maxTokens = "max_tokens"
+    case maxCompletionTokens = "max_completion_tokens"
 }
 
 public struct RecipeStep: Codable, Sendable {

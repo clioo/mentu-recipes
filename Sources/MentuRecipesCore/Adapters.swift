@@ -12,6 +12,7 @@ public enum StreamFormat: String, Sendable, Codable {
     case openAISSE = "openai_sse"
     case plainText = "plain_text"
     case ollamaJSON = "ollama_json"
+    case piJSON = "pi_json"
 }
 
 public enum SystemContextHandling: String, Sendable, Codable {
@@ -185,6 +186,8 @@ public enum AdapterRegistry {
             return ClaudeCLIAdapter()
         case "codex":
             return CodexCLIAdapter()
+        case "pi":
+            return PiCLIAdapter()
         default:
             return nil
         }
@@ -209,7 +212,8 @@ public enum AdapterRegistry {
             OpenAIChatAdapter.deepSeek(),
             OpenAIChatAdapter.ollama(),
             ClaudeCLIAdapter(),
-            CodexCLIAdapter()
+            CodexCLIAdapter(),
+            PiCLIAdapter()
         ]
     }
 
@@ -239,6 +243,8 @@ public enum AdapterRegistry {
             )
         case .shell:
             return ShellAdapter()
+        case .pi:
+            return PiCLIAdapter(name: name, config: config)
         case .cli:
             if normalize(name) == "codex" {
                 return CodexCLIAdapter()
