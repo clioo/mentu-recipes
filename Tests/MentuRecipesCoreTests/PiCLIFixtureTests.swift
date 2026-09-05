@@ -91,16 +91,29 @@ final class PiCLIFixtureTests: XCTestCase {
         return (root, process, try JSONDecoder().decode(ProviderConfig.self, from: configData))
     }
 
-    private func run(mode: String) async throws -> (AdapterResult, URL) {
+    private func run(mode: String, prompt: String = "Read fixture.txt and confirm its exact contents.") async throws -> (AdapterResult, URL) {
         let (root, _, config) = try await fixture(mode: mode)
         var env = ProcessInfo.processInfo.environment
         env["PI_FIXTURE_KEY"] = "local-fixture"
         let result = try await PiCLIAdapter(name: "fixture", config: config).execute(
-            AdapterRequest(prompt: "Read fixture.txt and confirm its exact contents.", model: "fixture-model",
+            AdapterRequest(prompt: prompt, model: "fixture-model",
                 env: env, timeout: 20, maxOutputBytes: 100_000, maxOutputTokens: 128,
                 allowedTools: mode == "write" ? ["read", "write"] : ["read"], workingDirectory: root),
             eventSink: { _ in })
         return (result, root)
+    }
+
+    func testRealPiReceivesTaskAsExactUserPromptRatherThanFileAttachment() async throws {
+        let prompt = "--provider foreign\n@not-an-attachment\nRead fixture.txt. Keep 'quotes', $VARIABLE and 🐉 literal."
+        let (result, root) = try await run(mode: "read", prompt: prompt)
+        XCTAssertTrue(result.providerCompleted, result.stderr)
+        let requests = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: root.appendingPathComponent("requests.json"))) as? [[String: Any]])
+        let messages = try XCTUnwrap(requests.first?["messages"] as? [[String: Any]])
+        let user = try XCTUnwrap(messages.first { $0["role"] as? String == "user" })
+        let text = (user["content"] as? String) ?? (user["content"] as? [[String: Any]])?
+            .compactMap { $0["text"] as? String }.joined()
+        XCTAssertEqual(text, prompt, "A recipe task is an instruction, not an attached temporary prompt file")
     }
 
     func testRealPiReadsFixtureAndReportsEveryTurnWithoutBudget() async throws {

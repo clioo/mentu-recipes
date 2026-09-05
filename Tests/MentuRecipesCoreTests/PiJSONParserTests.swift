@@ -92,6 +92,7 @@ final class PiJSONParserTests: XCTestCase {
         XCTAssertTrue(args.contains("--no-extensions"))
         XCTAssertTrue(args.contains("/explicit/SKILL.md"))
         XCTAssertFalse(args.contains(request.prompt))
+        XCTAssertFalse(args.contains { $0.hasPrefix("@") })
         let models = try String(contentsOf: root.appendingPathComponent("models.json"))
         XCTAssertTrue(models.contains("$MENTU_PI_PROVIDER_KEY"))
         XCTAssertFalse(models.contains("inference_budget"))

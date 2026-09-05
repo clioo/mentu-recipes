@@ -81,6 +81,7 @@ public struct PiCLIAdapter: BackendAdapter {
             env: env, workingDirectory: request.workingDirectory,
             timeout: request.timeout,
             maxOutputBytes: request.maxOutputBytes,
+            standardInputFile: profile.appendingPathComponent("prompt.txt"),
             stdoutSink: { chunk in parser.append(chunk).forEach(eventSink) }, stderrSink: { _ in })
         let parsed = parser.finish()
         let complete = result.exitCode == 0 && parsed.completed && !parsed.failed
