@@ -482,4 +482,8 @@ enum CLI {
     }
 }
 
-exit(await CLI.main())
+if ["run", "resume", "retry-step"].contains(CommandLine.arguments.dropFirst().first ?? "") {
+    exit(await CLISignalCancellation().run { await CLI.main() })
+} else {
+    exit(await CLI.main())
+}
