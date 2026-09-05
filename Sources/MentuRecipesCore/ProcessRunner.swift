@@ -22,6 +22,7 @@ public enum ProcessRunner {
         workingDirectory: URL,
         timeout: Int,
         maxOutputBytes: Int,
+        standardInputFile: URL? = nil,
         eventSink: @escaping (String) -> Void
     ) async throws -> AdapterResult {
         try await run(
@@ -31,6 +32,7 @@ public enum ProcessRunner {
             workingDirectory: workingDirectory,
             timeout: timeout,
             maxOutputBytes: maxOutputBytes,
+            standardInputFile: standardInputFile,
             stdoutSink: { eventSink($0) },
             stderrSink: { eventSink($0) }
         )
@@ -43,6 +45,7 @@ public enum ProcessRunner {
         workingDirectory: URL,
         timeout: Int,
         maxOutputBytes: Int,
+        standardInputFile: URL? = nil,
         stdoutSink: @escaping (String) -> Void,
         stderrSink: @escaping (String) -> Void
     ) async throws -> AdapterResult {
@@ -54,16 +57,16 @@ public enum ProcessRunner {
 
         let stdout = Pipe()
         let stderr = Pipe()
-        let stdin = Pipe()
+        let input = try standardInputFile.map { try FileHandle(forReadingFrom: $0) }
+        defer { try? input?.close() }
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = stdin
+        process.standardInput = input ?? FileHandle.nullDevice
 
         let buffer = OutputBuffer(maxBytes: maxOutputBytes)
         let readers = DispatchGroup()
 
         try process.run()
-        try? stdin.fileHandleForWriting.close()
 
         startReader(
             handle: stdout.fileHandleForReading,

@@ -33,7 +33,6 @@ enum PiProfile {
             try writePrivate(Data(context.utf8), to: file)
             args += ["--append-system-prompt", file.path]
         }
-        args.append("@\(prompt.path)")
         return args
     }
 
