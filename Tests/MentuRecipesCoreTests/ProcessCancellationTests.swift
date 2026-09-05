@@ -87,7 +87,13 @@ final class ProcessCancellationTests: XCTestCase {
                 ["label": "later", "backend": "shell", "prompt": "touch forbidden-later", "expected_changes": ["forbidden-later"]]
             ]]
         try JSONSerialization.data(withJSONObject: definition).write(to: recipes.appendingPathComponent("cancel.json"))
-        let executable = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/debug/mentu-recipes")
+        #if DEBUG
+        let configuration = "debug"
+        #else
+        let configuration = "release"
+        #endif
+        let executable = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/\(configuration)/mentu-recipes")
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path), "Build the CLI before testing")
         let plan = try await ProcessRunner.run(executable: executable.path,
             arguments: ["plan", "cancel", "--workspace", root.path], env: environment,
