@@ -9,7 +9,6 @@ final class CLISignalCancellation {
     private var restore: [() -> Void] = []
 
     func run(_ operation: @escaping () async -> Int32) async -> Int32 {
-        defer { withExtendedLifetime(self) {} }
         for number in [SIGINT, SIGTERM] {
             // A caught no-op resets on exec; SIG_IGN would leak into child tools.
             let previous = signal(number) { _ in }
